@@ -1,3 +1,4 @@
+import { startDebugGame } from './debug-helper';
 import { openHandZoom } from './zoom-helper';
 import { test, expect, type Page } from '@playwright/test';
 
@@ -48,7 +49,7 @@ test('mobile chooses a floor card before striking it, flips at the deck and stri
 }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto('/?debug=1');
-  await page.getByRole('button', { name: /혼자 치기/ }).click();
+  await startDebugGame(page);
   await page.getByRole('button', { name: '개발', exact: true }).click();
   await page.getByRole('button', { name: '바닥 두 장 · 따닥', exact: true }).click();
   const hand = page.locator('.hand-card[data-card-id="m1-2"]');
@@ -94,7 +95,7 @@ test('mobile native close requests dismiss hand popup then confirm return to lob
   page,
 }) => {
   await page.goto('/?debug=1');
-  await page.getByRole('button', { name: /혼자 치기/ }).click();
+  await startDebugGame(page);
   await openHandZoom(page);
   const popup = page.locator('dialog.zoom-modal[open]');
   await expect(popup).toBeVisible();
@@ -126,7 +127,7 @@ for (const draw of ['m1-2', 'm12-0'])
   }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.goto('/?debug=1');
-    await page.getByRole('button', { name: /혼자 치기/ }).click();
+    await startDebugGame(page);
     await page.getByRole('button', { name: '개발', exact: true }).click();
     await page.getByText('직접 패 분배', { exact: true }).click();
     await page.getByRole('textbox', { name: '직접 패 분배 JSON' }).fill(
@@ -172,7 +173,7 @@ for (const stage of ['hand', 'deck'])
   }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.goto('/?debug=1');
-    await page.getByRole('button', { name: /혼자 치기/ }).click();
+    await startDebugGame(page);
     await page.getByRole('button', { name: '개발', exact: true }).click();
     await page.getByText('직접 패 분배', { exact: true }).click();
     const played = stage === 'hand' ? 'm1-0' : 'm11-0';

@@ -1,30 +1,19 @@
+import { startDebugGame } from './debug-helper';
 import { test, expect, type Page } from '@playwright/test';
+import { observeFlights, recordedFlight } from './flight-observer';
 
 async function fixture(page: Page, name: string) {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto('/?debug=1');
-  await page.getByRole('button', { name: /혼자 치기/ }).click();
+  await startDebugGame(page);
   await page.getByRole('button', { name: '개발', exact: true }).click();
   await page.getByRole('button', { name, exact: true }).click();
+  await observeFlights(page);
 }
 
-async function endpoint(page: Page, motion: string, endpoint: 'from' | 'to', target: string) {
-  return page.locator(motion).evaluate(
-    (el, { endpoint, target }) => {
-      const style = (el as HTMLElement).style;
-      const board = document.querySelector('.floor-area')!.getBoundingClientRect();
-      const rect = document.querySelector(target)!.getBoundingClientRect();
-      const width = parseFloat(style.getPropertyValue('--motion-width'));
-      const height = parseFloat(style.getPropertyValue('--motion-height'));
-      return {
-        x: parseFloat(style.getPropertyValue(`--${endpoint}-x`)) + width / 2 + board.left,
-        y: parseFloat(style.getPropertyValue(`--${endpoint}-y`)) + height / 2 + board.top,
-        targetX: rect.left + rect.width / 2,
-        targetY: rect.top + rect.height / 2,
-      };
-    },
-    { endpoint, target },
-  );
+function sameCenter(actual: [number, number], target: [number, number]) {
+  expect(actual[0]).toBeCloseTo(target[0], 0);
+  expect(actual[1]).toBeCloseTo(target[1], 0);
 }
 
 test('mobile bonus pauses at center then enters own captured pi without landing on floor', async ({
@@ -32,35 +21,15 @@ test('mobile bonus pauses at center then enters own captured pi without landing 
 }) => {
   await fixture(page, '보너스 손패');
   await page.locator('.hand-card[data-card-id="bonus-0"]').click();
-  const preview = page.locator('.card-motion.bonus');
-  await expect(preview).toBeVisible();
-  const center = await endpoint(page, '.card-motion.bonus', 'to', '.deck .hwatu');
-  expect(center.x).toBeCloseTo(center.targetX, 0);
-  expect(center.y).toBeCloseTo(center.targetY, 0);
+  await expect.poll(() => recordedFlight(page, 'bonus', 'bonus-0')).toBeTruthy();
+  const preview = (await recordedFlight(page, 'bonus', 'bonus-0'))!;
+  sameCenter(preview.to, preview.deck);
+  await expect.poll(() => recordedFlight(page, 'bonus-capture', 'bonus-0')).toBeTruthy();
+  const capture = (await recordedFlight(page, 'bonus-capture', 'bonus-0'))!;
+  sameCenter(capture.from, capture.deck);
+  sameCenter(capture.to, capture.ownPi);
+  expect(preview.floorBonus || capture.floorBonus).toBe(false);
   await expect(page.locator('[data-floor-card-id="bonus-0"]')).toHaveCount(0);
-  await expect(page.locator('.card-motion.bonus-capture')).toBeVisible();
-  const intoPi = await page.locator('.card-motion.bonus-capture').evaluate((el) => {
-    const board = document.querySelector('.floor-area')!.getBoundingClientRect();
-    const pile = document
-      .querySelectorAll('.captured')[1]
-      .querySelectorAll('.captured-group')[3]
-      .getBoundingClientRect();
-    const style = (el as HTMLElement).style;
-    return {
-      x:
-        parseFloat(style.getPropertyValue('--to-x')) +
-        parseFloat(style.getPropertyValue('--motion-width')) / 2 +
-        board.left,
-      y:
-        parseFloat(style.getPropertyValue('--to-y')) +
-        parseFloat(style.getPropertyValue('--motion-height')) / 2 +
-        board.top,
-      targetX: pile.left + pile.width / 2,
-      targetY: pile.top + pile.height / 2,
-    };
-  });
-  expect(intoPi.x).toBeCloseTo(intoPi.targetX, 0);
-  expect(intoPi.y).toBeCloseTo(intoPi.targetY, 0);
   await expect(page.getByTestId('game-table')).toHaveAttribute('data-busy', 'false');
   await expect(
     page.locator('.captured').nth(1).locator('[data-captured-card-id="bonus-0"]'),
@@ -71,31 +40,24 @@ test('mobile bomb creates two playable hand tokens and stolen pi flies from oppo
   page,
 }) => {
   await fixture(page, '폭탄과 피 강탈');
-  const stolen = await page
+  const stolen = (await page
     .locator('.captured')
     .first()
     .locator('[data-captured-card-id]')
-    .getAttribute('data-captured-card-id');
+    .getAttribute('data-captured-card-id'))!;
   await page.locator('.hand-card[data-card-id="m1-0"]').click();
   await page.getByRole('button', { name: '폭탄 내기', exact: true }).click();
-  await expect(page.locator('.card-motion.transfer')).toBeVisible();
-  const callout = page.locator('.turn-message.callout');
-  await expect(callout).toContainText('폭탄');
-  expect(
-    await callout.evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
-  ).toBeGreaterThanOrEqual(26);
-  await page.screenshot({ path: '/tmp/toki-special-effect.png' });
-  const from = await endpoint(
-    page,
-    '.card-motion.transfer',
-    'from',
-    `.captured [data-captured-card-id="${stolen}"] .hwatu`,
-  );
-  expect(from.x).toBeCloseTo(from.targetX, 0);
-  expect(from.y).toBeCloseTo(from.targetY, 0);
+  await expect.poll(() => recordedFlight(page, 'transfer', stolen)).toBeTruthy();
+  const transfer = (await recordedFlight(page, 'transfer', stolen))!;
+  expect(transfer.opponentCard).not.toBeNull();
+  sameCenter(transfer.from, transfer.opponentCard!);
+  sameCenter(transfer.to, transfer.ownPi);
+  expect(transfer.effect).toContain('폭탄');
+  expect(transfer.effectFont).toBeGreaterThanOrEqual(26);
+  await expect(page.getByTestId('game-table')).toHaveAttribute('data-busy', 'false');
   await expect(
     page.locator('.captured').first().locator(`[data-captured-card-id="${stolen}"]`),
-  ).toBeHidden();
+  ).toHaveCount(0);
   await expect(page.locator('.bomb-pass')).toHaveCount(2);
   await expect(page.locator('.pass-button')).toHaveCount(0);
   await expect(

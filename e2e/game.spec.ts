@@ -1,3 +1,4 @@
+import { startDebugGame } from './debug-helper';
 import { openHandZoom } from './zoom-helper';
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
 async function speed(context: BrowserContext) {
@@ -13,10 +14,14 @@ async function game(page: Page) {
 }
 async function act(page: Page) {
   const table = page.getByTestId('game-table');
-  const phase = await table.getAttribute('data-phase');
-  if (phase === 'FINISHED') return false;
-  if ((await table.getAttribute('data-can-act')) !== 'true') return false;
-  const before = await table.getAttribute('data-version');
+  // One browser snapshot: the computer may finish between separate protocol calls.
+  const {
+    phase,
+    canAct,
+    busy,
+    version: before,
+  } = await table.evaluate((el) => ({ ...(el as HTMLElement).dataset }));
+  if (phase === 'FINISHED' || canAct !== 'true' || busy !== 'false') return false;
   if (phase === 'SELECT_KUKJIN') await page.getByRole('button', { name: /쌍피로 사용/ }).click();
   else if (phase === 'GO_STOP')
     await page.getByRole('button', { name: '스톱 이번 판을 마쳐요' }).click();
@@ -106,7 +111,7 @@ test('mobile single rounds accumulate across reload and new session, with confir
 }) => {
   await speed(context);
   await page.goto('/?debug=1');
-  await page.getByRole('button', { name: /혼자 치기/ }).click();
+  await startDebugGame(page);
   await page.getByRole('button', { name: '개발', exact: true }).click();
   await page.getByLabel('애니메이션 건너뛰기').check();
   await page.getByRole('button', { name: '닫기' }).click();

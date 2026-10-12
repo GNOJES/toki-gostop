@@ -1,3 +1,4 @@
+import { startDebugGame } from './debug-helper';
 import { test, expect } from '@playwright/test';
 
 test('mobile single play never uses the saved friend name and friend form stays simple', async ({
@@ -9,10 +10,8 @@ test('mobile single play never uses the saved friend name and friend form stays 
   });
   await page.setViewportSize({ width: 378, height: 672 });
   await page.goto('/?debug=1');
-  await page.getByRole('button', { name: /혼자 치기/ }).click();
-  await expect(page.locator('.player-info').last().locator('.player-name')).toHaveText(
-    /^나(?:선)?0승$/,
-  );
+  await startDebugGame(page);
+  await expect(page.locator('.player-info').last().locator('.player-name-text')).toHaveText('나');
   await expect(page.getByTestId('game-table')).not.toContainText('배포완료B');
   await page.getByRole('button', { name: '나가기', exact: true }).click();
   await page
@@ -34,15 +33,12 @@ test('mobile single play never uses the saved friend name and friend form stays 
   expect(await join.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(672);
   await page.screenshot({ path: '/tmp/toki-friend-form.png' });
   await page.getByRole('button', { name: '홈으로', exact: true }).click();
-  await page.getByRole('button', { name: /혼자 치기/ }).click();
-  await expect(page.locator('.player-info').last().locator('.player-name')).toHaveText(
-    /^나(?:선)?0승$/,
-  );
+  await startDebugGame(page);
+  await expect(page.locator('.player-info').last().locator('.player-name-text')).toHaveText('나');
   await expect(page.getByTestId('game-table')).not.toContainText('민수');
   await page.reload();
+  // Leaving clears the debug query; verify the real single-player name after reload.
   await page.getByRole('button', { name: /혼자 치기/ }).click();
-  await expect(page.locator('.player-info').last().locator('.player-name')).toHaveText(
-    /^나(?:선)?0승$/,
-  );
+  await expect(page.locator('.player-info').last().locator('.player-name-text')).toHaveText('나');
   expect(await page.evaluate(() => localStorage.getItem('toki.nickname.v1'))).toBe('민수');
 });
