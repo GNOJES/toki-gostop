@@ -1,3 +1,4 @@
+import { startDebugGame } from './debug-helper';
 import { openHandZoom } from './zoom-helper';
 import { test, expect } from '@playwright/test';
 
@@ -36,13 +37,21 @@ test('mobile computer dealer waits for start confirmation', async ({ page, conte
 test('mobile resting cards keep their coordinates after capture, strike is tilted and text is above it', async ({
   page,
 }) => {
+  // Keep the same media/layout settings for both coordinate samples.
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto('/?debug=1');
-  await page.getByRole('button', { name: /혼자 치기/ }).click();
+  await startDebugGame(page);
   await page.getByRole('button', { name: '개발', exact: true }).click();
   await page.getByRole('button', { name: '바닥 두 장 · 따닥', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '개발 · 룰 검증' })).toHaveCount(0);
   await expect(page.locator('button[data-floor-card-id="m1-0"]')).toBeVisible();
   await expect(page.locator('button[data-floor-card-id="m1-1"]')).toBeVisible();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
   const before: Record<string, { x: number; y: number }> = await page
     .locator('button[data-floor-card-id]')
     .evaluateAll((els) =>
@@ -53,7 +62,21 @@ test('mobile resting cards keep their coordinates after capture, strike is tilte
         ]),
       ),
     );
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  // Capture the first completed turn inside the browser, before the CPU can start.
+  await page.evaluate(() => {
+    const table = document.querySelector<HTMLElement>('[data-testid="game-table"]')!;
+    const completedVersion = String(Number(table.dataset.version) + 2);
+    new MutationObserver(() => {
+      if (table.dataset.busy !== 'false' || table.dataset.version !== completedVersion) return;
+      (
+        window as unknown as { completedFloorRects: Record<string, { x: number; y: number }> }
+      ).completedFloorRects = Object.fromEntries(
+        Array.from(document.querySelectorAll<HTMLElement>('button[data-floor-card-id]')).map(
+          (el) => [el.dataset.floorCardId!, el.getBoundingClientRect().toJSON()],
+        ),
+      );
+    }).observe(table, { attributes: true, attributeFilter: ['data-busy', 'data-version'] });
+  });
   await page.locator('.hand-card[data-card-id="m1-2"]').click();
   await page.getByRole('button', { name: '1월 송학 띠 선택', exact: true }).click();
   const moving = page.locator('.card-motion.play');
@@ -67,20 +90,22 @@ test('mobile resting cards keep their coordinates after capture, strike is tilte
     await page.locator('.turn-message').evaluate((el) => Number(getComputedStyle(el).zIndex)),
   ).toBeGreaterThan(await moving.evaluate((el) => Number(getComputedStyle(el).zIndex)));
   await expect(page.getByTestId('game-table')).toHaveAttribute('data-busy', 'false');
-  const after: Record<string, { x: number; y: number }> = await page
-    .locator('button[data-floor-card-id]')
-    .evaluateAll((els) =>
-      Object.fromEntries(
-        els.map((el) => [
-          el.getAttribute('data-floor-card-id'),
-          el.getBoundingClientRect().toJSON(),
-        ]),
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => !!(window as unknown as { completedFloorRects?: unknown }).completedFloorRects,
       ),
-    );
+    )
+    .toBe(true);
+  const after = await page.evaluate(
+    () =>
+      (window as unknown as { completedFloorRects: Record<string, { x: number; y: number }> })
+        .completedFloorRects,
+  );
   for (const [id, rect] of Object.entries(after))
     if (before[id]) {
-      expect(rect.x).toBeCloseTo(before[id].x, 1);
-      expect(rect.y).toBeCloseTo(before[id].y, 1);
+      expect(rect.x, `resting card ${id} x`).toBeCloseTo(before[id].x, 1);
+      expect(rect.y, `resting card ${id} y`).toBeCloseTo(before[id].y, 1);
     }
 });
 
