@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { GoogleAnalytics } from '../components/GoogleAnalytics';
 export const metadata: Metadata = {
   metadataBase: new URL('https://toki-matgo.vercel.app'),
   title: '토끼맞고 · 마주 앉은 것처럼',
@@ -39,7 +40,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
-      <body>{children}</body>
+      <body>
+        {children}
+        <GoogleAnalytics />
+      </body>
     </html>
   );
 }

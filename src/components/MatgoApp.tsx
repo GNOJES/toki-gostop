@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom';
 import QRCode from 'qrcode';
 import { readHistory, updateHistory } from '../lib/history-store';
 import { registerPwa } from '../lib/register-pwa';
+import { trackAnalyticsOnce } from '../lib/analytics';
 import { cardFlight, type FlightGeometry } from '../lib/card-motion';
 import { syncFloorLayout, FLOOR_PLACES, type FloorLayout } from '../lib/floor-layout';
 import { useAppBack } from '../lib/use-app-back';
@@ -465,6 +466,7 @@ export function MatgoApp() {
   const saveResult = useCallback((input: Parameters<typeof addResult>[1]) => {
     if (recorded.current.has(input.id)) return;
     recorded.current.add(input.id);
+    trackAnalyticsOnce('game_end', input.id, input.mode);
     void updateHistory((h) => addResult(h, input))
       .then((next) => {
         historyRef.current = next;
@@ -523,7 +525,18 @@ export function MatgoApp() {
                     setError('방이 종료되었어요. 대기실로 돌아가 새 방을 만들어주세요.');
                     return;
                   }
+                  if (!_uid && (!code || data.me === 1))
+                    trackAnalyticsOnce(
+                      code ? 'room_join' : 'room_create',
+                      `room:${data.code}:${data.expiresAt}:${data.me}`,
+                      'multi',
+                    );
                   if (data.game) {
+                    trackAnalyticsOnce(
+                      'game_start',
+                      `multi:${data.code}:${data.expiresAt}:${data.round}:${data.me}`,
+                      'multi',
+                    );
                     if (data.game.result)
                       saveResult({
                         id: `multi:${data.code}:${data.expiresAt}:${data.round}:${data.me}`,
@@ -671,6 +684,7 @@ export function MatgoApp() {
           },
     );
     logical.current = game;
+    trackAnalyticsOnce('game_start', soloRoundId.current, 'single');
     publish(projectState(game, 0));
     setScreen('game');
     setDealerNotice(!debug && !game.result);
