@@ -1,125 +1,68 @@
-# 토끼맞고
+# 토끼고스톱
 
-**패는 없어도, 마주 앉은 것처럼.** 가족·친구 두 사람이 각자 스마트폰으로 치는 한국식 맞고 모바일웹. 기본 화투 48장 + 보너스 쌍피 2장, 게임머니/베팅/미션 없음.
+**패는 없어도, 마주 앉은 것처럼.** 혼자와 AI 둘, 또는 가족·친구 세 사람이 스마트폰으로 즐기는 고스톱이다. 기본 48장과 보너스 쌍피 2장을 사용하며 게임머니·베팅 없이 순점수를 기록한다.
 
-혼자 치기는 브라우저에서 실행한다. **친구와 치기는 Vercel 프런트엔드 + Firebase Anonymous Auth / Realtime Database**를 사용한다. 방장 브라우저가 기존 엔진으로 판정하고 Firebase에 최종 상태를 저장한다. 별도 상시 Node 서버나 Cloud Functions는 필요 없다.
+토끼맞고를 복제한 독립 프로젝트다. 기존 Git 이력과 카드·토끼·소리·연출은 이어가고, 저장소·Firebase·Vercel·GA·브라우저 기록·PWA 캐시는 분리한다. 새 원격의 지정 대상은 `GNOJES/toki-gostop` 공개 저장소이며 실제 운영 연결 상태는 [QA](docs/QA.md)에 기록한다.
 
-## 실행
+## 개발
 
-Node.js 24 이상 권장(현재 검증 Node 26), npm 사용. Firebase 에뮬레이터에는 **Java 21 이상**도 필요하다.
+Node.js 24 이상, npm, Firebase 에뮬레이터용 Java 21 이상이 필요하다.
 
 ```sh
 npm ci
-npm run dev             # http://localhost:3000, .env.local의 실제 Firebase 사용
+npm run dev             # 혼자 치기. 실제 Firebase는 별도 고스톱 설정 필요
 ```
 
-현재 로컬 `.env.local`은 프로젝트 `toki-matgo` 설정으로 구성되어 있다. 이 파일은 Git에 포함하지 않는다. 다른 PC에서는 `.env.example`을 `.env.local`로 복사해 아래 값을 입력한다. Firebase Console에 Anonymous Authentication을 활성화하고 Rules를 적용한 뒤 친구와 치기를 실행한다. 설정 없이도 혼자 치기는 가능하다.
+복제된 `.env.local`의 맞고 프로젝트 설정은 사용을 거절한다. 이 파일은 Git에 포함하지 않는다. `.env.example`에 정의한 전용 Firebase 설정, 승인 프로젝트 ID, 운영 origin, 별도 GA ID를 등록한다. 서비스 계정 키는 넣지 않는다.
 
-운영 데이터를 쓰지 않는 개발·테스트는 별도 터미널 두 개에서 실행한다.
+운영 DB를 사용하지 않는 친구방 개발은 두 터미널에서 실행한다.
 
 ```sh
-npm run emulators       # demo-toki-matgo: Auth 9099, Database 9000, 관리 UI 4000
-npm run dev:firebase    # http://localhost:3000, 에뮬레이터용 설정 자동 적용
+npm run emulators       # demo-toki-gostop: Auth 9199 / Database 9100 / UI 4400
+npm run dev:firebase
 ```
 
-브라우저 일반 창과 시크릿 창을 열어 서로 다른 익명 사용자로 접속한다. 일반 창에서 친구와 치기 → 이름 입력 → 방 만들기 → 링크/코드/QR 공유, 시크릿 창에서 참가하면 자동으로 시작한다. 같은 브라우저의 일반 탭들은 동일 UID를 공유하므로 두 명 테스트에 사용하지 않는다.
+서로 다른 익명 UID가 필요하므로 세 개의 독립 브라우저 프로필을 사용한다. 같은 프로필의 탭들은 한 UID를 공유한다. 방 만들기 후 URL/QR/4자리 코드로 참가하며 세 번째 사람이 연결되면 첫 판을 시작한다. 다음 판은 전원 ‘한 판 더’ 동의가 필요하다.
 
-## Firebase Console 설정
-
-프로젝트 `toki-matgo`, Realtime Database 주소는 `https://toki-matgo-default-rtdb.asia-southeast1.firebasedatabase.app`이다.
-
-1. Authentication → Sign-in method → **Anonymous 활성화**. 현재 사용자가 활성화 완료한 상태다.
-2. Realtime Database → **Rules**에서 [database.rules.json](database.rules.json)의 **전체 내용**으로 교체하고 Publish한다. 현재 잠금 모드는 적용 전까지 방 만들기/참가를 차단한다. 상세 접근 권한과 적용 절차는 [Firebase 운영 안내](docs/FIREBASE.md)에 있다.
-3. Project settings → General → Web 앱 설정에서 환경변수를 확인한다. Firebase Storage나 Firestore를 활성화할 필요는 없다. Cloud Functions도 사용하지 않는다.
-4. 새 프로젝트를 만드는 경우 Realtime Database는 먼저 잠금 모드로 생성한 다음 동일 Rules를 적용한다. 공개 read/write 테스트 모드로 바꾸지 않는다.
-
-Firebase web config는 브라우저에 포함되는 공개 설정이다. 실제 권한은 익명 인증 UID와 Database Rules로 제한한다. 서비스 계정 키/Admin SDK 자격증명은 이 앱에 넣지 않는다.
-
-## Vercel 환경변수와 배포
-
-Vercel → 프로젝트 → Settings → Environment Variables에 아래 **7개 변수**를 Production에 등록한다. Preview에서도 실제 Firebase를 사용할 경우 같은 변수들을 Preview에도 등록한다.
-
-```dotenv
-NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyDg7tXY4mgxsAXp5di_icvlDd-BPL3bT5U
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=toki-matgo.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_DATABASE_URL=https://toki-matgo-default-rtdb.asia-southeast1.firebasedatabase.app
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=toki-matgo
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=toki-matgo.firebasestorage.app
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=651336244726
-NEXT_PUBLIC_FIREBASE_APP_ID=1:651336244726:web:7d331c7f2cf5da26cebbd7
-```
-
-`NEXT_PUBLIC_FIREBASE_USE_EMULATORS`는 Vercel에서 등록하지 않거나 `false`로 설정한다. `NEXT_PUBLIC_FIREBASE_EMULATOR_HOST`도 필요 없다. `NEXT_PUBLIC_REALTIME_URL`, `FRONTEND_ORIGIN`, 게임 서버용 `PORT`는 더 이상 사용하지 않는다.
-
-1. GitHub `GNOJES/toki-matgo`를 Import한다. Framework는 Next.js, Root Directory는 저장소 루트, Production Branch는 `main`이다.
-2. 위 환경변수를 입력한다. 저장소 `vercel.json`의 Build Command는 `npm run build:vercel`이고 Output Directory는 기본값이다. Vercel에 `NEXT_BUILD_DIR`를 설정하거나 `npm run start:server`를 실행하지 않는다.
-3. Firebase Rules를 Publish하고 Vercel을 Deploy/Redeploy한다. `NEXT_PUBLIC_` 값은 빌드 시 포함되므로 변수 변경 후에는 재배포가 필요하다.
-4. 실제 휴대폰 두 대로 배포 URL을 연다. 한쪽에서 방을 만들고 상대에게 초대 링크/QR/숫자 4자리 코드를 전달한다. 두 기기가 같은 Wi-Fi일 필요는 없다. 양쪽 인터넷 연결과 방장 브라우저가 필요하다.
-5. 카드 내기·먹을 패 선택·고/스톱·한 판 더, 게스트 새로고침, 방장 일시 연결 해제/복귀, 나가기를 확인한다. 자세한 체크리스트는 [QA](docs/QA.md)를 참고한다.
-
-## 검증
+## 검증과 빌드
 
 ```sh
-npm test                # 기존 규칙/legacy 테스트 + Firebase host 판정 단위 테스트
 npm run typecheck
-npm run test:firebase   # Auth/Database 에뮬레이터 자동 시작·종료, 보안 + 실제 SDK 통합
-npm run test:e2e        # 에뮬레이터 + Next 자동 시작, 두 브라우저 대전/모바일 회귀
-npm run build          # .next-prod standalone 프로덕션 빌드
-npm run test:pwa        # 프로덕션 캐시·오프라인 싱글플레이
+npm test
+npm run test:firebase
+npm run test:e2e
+npm run build
+npm run test:pwa
 ```
 
-처음에는 `npx playwright install chromium webkit`으로 테스트 브라우저를 설치한다. 에뮬레이터 테스트를 실행할 때 수동 실행 중인 에뮬레이터를 종료해 포트 충돌을 피한다. 테스트는 `demo-toki-matgo`와 로컬 Auth/Database를 사용하며 실제 프로젝트 DB에 쓰지 않는다. E2E는 `.next-firebase`, 자체 운영 빌드는 `.next-prod`를 사용한다. 결과는 `playwright-report`, 실패 trace는 `test-results`에 저장한다.
+브라우저 설치는 `npx playwright install chromium webkit`이다. Firebase 테스트는 전용 demo 프로젝트만 사용한다. E2E의 Next 출력은 `.next-firebase`, 운영 standalone은 `.next-prod`다. `npm start`로 운영 빌드를 실행한다. 테스트 결과와 trace는 Git에서 제외한다.
 
-4자리 방 코드 버전으로 업데이트할 때는 **`database.rules.json`의 새 규칙을 Firebase Console에 다시 게시한 뒤** 새 방을 만든다. 기존 6자리 방은 저장된 참가 정보로 재접속만 지원하며 새로 만들지는 않는다.
+운영 빌드는 전용 Firebase·origin·GA 설정이 없거나 원본 맞고 설정이면 실패한다. CI만 명시적인 demo fixture를 허용한다. `.github/workflows/ci.yml`은 타입→단위→Firebase→E2E→운영 빌드→PWA를 순서대로 실행한다. 저장소의 `release-checks` 필수 통과와 브랜치 보호 설정은 별도로 확인해야 한다.
 
-## 연결과 운영 한계
+## 배포
 
-익명 UID와 방 코드를 유지한 같은 브라우저는 새로고침/짧은 네트워크 단절 후 같은 자리로 돌아온다. 어느 쪽이 끊기든 판정을 멈추고 상대 이름과 대기 시간을 표시한다. 2분부터 기다림을 끝내는 버튼도 표시하며 자동 패배 처리는 하지 않는다. 대기 중에도 나가기 버튼/뒤로가기 확인으로 홈에 돌아올 수 있다. 브라우저 저장소나 익명 계정이 사라지면 자리 복구는 보장하지 않는다. 자동 방장 교체는 없다.
+새 Firebase 프로젝트에 익명 인증과 잠금 RTDB를 구성하고 검증된 `database.rules.json`을 먼저 게시한다. 새 GitHub 저장소를 전용 Vercel 프로젝트에 연결한다. 빌드 명령은 `npm run build:vercel`, 기본 출력 경로를 사용한다. `.env.example`의 공개 Firebase 설정과 `FIREBASE_EXPECTED_PROJECT_ID`, `NEXT_PUBLIC_APP_ORIGIN`, `NEXT_PUBLIC_GA_MEASUREMENT_ID`를 등록하고 운영 빌드를 배포한다. `NEXT_PUBLIC_` 값 변경 후에는 재빌드해야 한다. 운영에서는 에뮬레이터를 사용하지 않는다.
 
-신뢰하는 친구 둘을 위한 구조다. UI에는 상대 손패 장수만 표시하지만 **DB에는 전체 손패/덱을 포함한 상태가 있다**. 참가자가 개발자 도구로 조사하면 볼 수 있으며 방장 자체의 조작도 막지 않는다. 공개 경쟁 게임용 치팅 방지 구조가 아니다.
+[Firebase 운영 안내](docs/FIREBASE.md)에 모델·Rules·복구·배포 순서가 있다. 프런트 배포 성공만으로 세 기기·GA·운영 DB 검증 완료를 의미하지 않는다.
 
-방은 생성 후 24시간 유효하다. 명시적으로 나가면 방을 종료하고 삭제한다. 새 방을 만들 때 이 브라우저가 저장한 자신의 만료/종료 방을 정리하고, 배정하려는 숫자 코드가 만료 방의 코드이면 삭제 후 재사용한다. 사용 중인 코드는 Firebase 트랜잭션으로 중복 배정되지 않게 보호한다. 모든 참가자가 저장소를 지우거나 다시 접속하지 않으면 오래된 기록이 남을 수 있어 Firebase Console에서 수동 정리가 필요하다. Firebase 무료 사용량 한도를 넘는 이용까지 무제한 무료를 보장하지는 않는다.
+## 연결과 기록
 
-## 기존 서버와 PWA
+누구든 연결이 끊기면 모두 멈추고 같은 브라우저·익명 UID 복귀를 기다린다. 2분 후 남은 사람은 종료하거나 계속 기다릴 수 있다. 선택 제한시간·자동 패배·AI 대체·자동 방장 교체는 없다. 시작 후 누구든 나가면 방은 종료하며 마지막 상태는 24시간 TTL까지 보존한다. 중단 판의 승패를 만들지 않고 확정된 즉시 점수는 유지한다.
 
-`server/index.ts`, `server/rooms.ts`, 관련 Socket.IO 의존성과 `dev:server` / `start:server` 명령은 **legacy 비교·별도 정리 대상**으로 보존한다. 현재 프런트는 이 서버에 연결하지 않으며 배포/개발에 실행할 필요가 없다. Firebase와 기존 서버를 동시에 운영하는 전환 경로는 없다.
+홈의 최근 기록은 이 브라우저의 완료 100판과 solo 누적 승패·순점수를 보관한다. 초기화 확인 후 solo 통계와 solo 목록을 지워도 같은 거래를 다시 더하지 않는다. 맞고 기록 이전·기기 간 동기화는 하지 않는다. 저장소를 지우면 기록과 익명 계정도 사라질 수 있다.
 
-자체 호스팅은 `npm run build` 후 `npm start`로 프런트를 실행한다. 빌드의 `.next-prod/standalone`에 정적 에셋도 복사한다. PWA는 production에서만 서비스워커를 등록하며 최초 온라인 로드 후 오프라인 혼자 치기를 지원한다. 멀티플레이는 인터넷이 필요하다. 배포 개정 시 `public/sw.js`의 캐시 버전을 갱신한다.
+신뢰하는 가족·친구용 방장 판정 구조다. UI는 상대 손패 장수만 표시하지만 참가자는 Firebase 전체 상태에서 타인 손패와 미래 덱을 볼 수 있다. 별도 상시 서버나 Cloud Functions는 없고 미사용 Socket.IO 서버는 제거했다.
 
-## 플레이 기록
+PWA는 첫 온라인 로드 후 오프라인 solo를 지원한다. 새 서비스워커는 진행 중 판을 유지하며 카드 에셋을 갱신한다. 원본 맞고 캐시는 삭제하지 않는다. 친구방은 인터넷이 필요하다.
 
-홈 화면의 **최근 기록**에서 이 브라우저로 완료한 혼자 치기·친구와 치기 결과를 확인한다. 최근 판 목록은 100개까지 저장하며, 혼자 치기 누적 승패·무승부·획득 점수는 목록 제한과 관계없이 계속 유지한다. 새 게임 시작이나 브라우저 재접속으로 누적 기록이 초기화되지 않는다. **혼자 치기 기록 초기화**를 확인하면 혼자 치기 누적 통계와 최근 판을 지우며 친구 기록은 유지한다. 브라우저 저장 공간을 지우면 기록도 삭제되며 기기 간 동기화는 하지 않는다.
+## 분석과 문서
 
-## 개발 도구와 문서
+GA는 전용 운영 origin에서만 설정된 별도 스트림을 사용한다. 로컬·Preview·debug·오프라인에서는 전송하지 않는다. `game_start`, `game_end`, `room_create`, `room_join`에 `game_mode`만 추가 전송한다. 세 사람이 완료한 한 판은 각 참가자의 시작·종료 이벤트가 각각 한 건씩이다. 중도 이탈은 종료 이벤트를 만들지 않는다. 중복 ID는 탭 내부에만 보관하고 닉네임·방 코드·UID·손패·query/hash는 전송하지 않는다. 별도 스트림의 향상된 자동 측정 설정과 실시간 수신은 운영 연결 후 확인한다.
 
-개발 서버 `/?debug=1` → 혼자 치기 → 하단 개발: seed, 뻑/따닥/폭탄/흔들기/자뻑 fixture, 직접 분배, 원본 상태/덱, 이벤트, 연출 건너뛰기. 운영 빌드에서는 표시하지 않는다.
-
-- [Firebase 운영 안내](docs/FIREBASE.md): 데이터 구조, Rules, 설정·재접속·정리·실기기 테스트
-- [규칙 명세](docs/RULES.md): 공식 한게임 맞고 문서와 구현 해석·계산 순서
-- [구조](docs/ARCHITECTURE.md): 엔진, Firebase transport, 판정·연출 동기화
+- [규칙](docs/RULES.md): 확정한 3인 룰과 정산
+- [구조](docs/ARCHITECTURE.md): 엔진·연출·통신·저널
 - [QA](docs/QA.md): 자동 검증과 실기기 확인 항목
-- [에셋](docs/ASSETS.md): Marcus Richert 원본 화투 대응표·CC BY-SA 출처, 보너스/뒷면
+- [에셋](docs/ASSETS.md): 카드 원본·CC BY-SA 출처와 생성 이미지
+- [설계](docs/superpowers/specs/2026-10-14-three-player-gostop-design.md), [구현 계획](docs/superpowers/plans/2026-10-15-three-player-gostop.md)
 
-### 출시 검증과 Rules 변경 배포
-
-- `npm run build` / Vercel 빌드는 Firebase 환경변수 누락·프로젝트 불일치·프로덕션 에뮬레이터 설정을 거절한다. Vercel 빌드에서는 단위 테스트도 실행한다.
-- `.github/workflows/ci.yml`의 `release-checks`가 타입·단위·Firebase Rules/통신·모바일 E2E·프로덕션 오프라인 테스트를 실행한다. 테스트는 demo 에뮬레이터를 사용한다.
-- GitHub main 브랜치 보호에서 **release-checks 필수 통과**를 설정한다. 워크플로 파일만으로 브랜치 보호나 Vercel 자동 배포 대기를 강제할 수는 없다. 보호 설정 전에는 검사 통과를 확인한 뒤 main에 병합한다.
-- 이번 데이터 구조 변경은 **Rules 게시 → 프런트엔드 배포 → 두 기기 새로고침·새 방 시작** 순서다. 상세 절차와 롤백은 [Firebase 운영 안내](docs/FIREBASE.md#2026-10-04-출시-전-개선-버전-적용-순서)를 따른다.
-
-## 접속자 통계 (GA4)
-
-운영 주소 `https://toki-matgo.vercel.app`에서 GA4 `G-4TM1JD07N3`로 방문 통계를 수집한다. 로컬 개발, Preview 주소, `?debug=1`에서는 태그와 이벤트를 수집하지 않는다. ID는 공개 설정값이며 기본값이 코드에 들어 있어 별도 Vercel 환경변수 등록 없이 동작한다. 변경할 때는 `NEXT_PUBLIC_GA_MEASUREMENT_ID`를 Production에 설정하고 재배포한다.
-
-| 추가 이벤트   | 수집 시점                                               |
-| ------------- | ------------------------------------------------------- |
-| `game_start`  | 한 판 시작. 혼자치기와 친구와 치기 모두 포함            |
-| `game_end`    | 정상적으로 결과가 결정된 판. 중도 이탈은 제외           |
-| `room_create` | 방 생성 성공                                            |
-| `room_join`   | 참가자의 방 입장 성공. 방장의 재입장과 자동 복구는 제외 |
-
-이벤트에는 `game_mode` (`single`/`multi`)만 추가로 보낸다. 친구와 치기의 시작·종료는 각 참여자 기준이므로 두 사람이 한 판을 완료하면 각각 2건이다. 같은 탭의 최근 이벤트는 sessionStorage로 중복 방지하여 새로고침·연결 복구 시 다시 보내지 않는다. 저장소가 차단되면 새로고침 사이의 중복 방지는 보장할 수 없다. 닉네임, 방 코드, UID, 손패는 이벤트로 전송하지 않으며 페이지와 유입 주소의 쿼리·해시를 제거한다.
-
-GA4 관리 → 데이터 스트림 → 토끼맞고 웹 스트림에서 **향상된 측정은 끄는 것을 권장**한다. 기본 페이지 조회와 네 가지 추가 이벤트를 직접 보내므로 스크롤·클릭 등 추가 자동 이벤트가 필요 없다. `session_start`, `first_visit`, `user_engagement` 등 GA4의 기본 자동 이벤트는 별도로 수집될 수 있다. 게임 모드를 보고서에서 비교하려면 이벤트 범위 맞춤 측정기준 `game_mode`를 등록한다. 광고 개인 최적화와 Google signals는 태그 설정에서 비활성화한다.
-
-배포 후 GA4 실시간 보고서에서 방문·이벤트를 확인한다. 광고 차단기, 네트워크 차단, 오프라인 플레이는 수집을 막을 수 있으므로 통계는 전체 이용의 근사치다. 개인정보 안내에는 Google Analytics 이용을 반영해야 한다.
+개발 서버의 `/?debug=1` → 혼자 치기 → 개발에서 fixture·직접 7장/바닥 6장 분배·연출 건너뛰기를 사용할 수 있다. 운영 빌드에는 개발 UI와 hook을 노출하지 않는다.

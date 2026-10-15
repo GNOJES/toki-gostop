@@ -17,3 +17,8 @@ Attribution-ShareAlike 4.0 International (CC BY-SA 4.0).
 License: https://creativecommons.org/licenses/by-sa/4.0/
 No endorsement by the original artists is implied.
 This image license notice does not license the application code.
+
+Toki Gostop adaptation (2026-10-15): title changed to 토끼고스톱 with
+Codex image generation, preserving the rabbit, ink-wash style and card motifs.
+Source: assets/social/toki-gostop-share-source-v1.png. Resized to 1200x630 JPEG.
+The same attribution and CC BY-SA 4.0 terms above apply to this adaptation.

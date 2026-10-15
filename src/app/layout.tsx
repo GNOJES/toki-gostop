@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     description: '화투패 없이, 스마트폰 세 대로. 가족과 친구가 함께 즐기는 느긋한 고스톱.',
     images: [
       {
-        url: '/social/toki-matgo-301e6e82ee94.jpg',
+        url: '/social/toki-gostop-3657d2dda547.jpg',
         width: 1200,
         height: 630,
         type: 'image/jpeg',
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: '토끼고스톱 · 마주 앉은 것처럼',
     description: '화투패 없이, 스마트폰 세 대로. 가족과 친구가 함께 즐기는 느긋한 고스톱.',
-    images: ['/social/toki-matgo-301e6e82ee94.jpg'],
+    images: ['/social/toki-gostop-3657d2dda547.jpg'],
   },
   manifest: '/manifest.webmanifest',
   icons: { icon: '/icon.svg', apple: '/icon-192.png' },

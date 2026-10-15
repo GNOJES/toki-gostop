@@ -21,6 +21,6 @@ PWA 캐시와 카드 주소 버전은 파일 내용의 SHA-256에서 자동 생�
 
 ## 페이지 공유 썸네일
 
-`public/social/toki-matgo-301e6e82ee94.jpg`는 1200×630 JPEG다. 큰 한글 제목·화투패를 든 토끼·녹색 먹빛과 한지 배경을 Codex 내장 imagegen으로 생성했다. 원본과 프롬프트는 `assets/social/`에 보관하며, 참고한 화투 그림의 출처와 CC BY-SA 4.0 표시는 `public/social/LICENSE.txt`에 포함한다. 파일 내용 해시를 주소에 넣어 새 이미지 배포 시 캐시와 구분한다.
+`public/social/toki-gostop-3657d2dda547.jpg`는 1200×630 JPEG다. 기존 공유 그림을 Codex 내장 imagegen으로 편집하여 제목을 토끼고스톱으로 바꾸고, 토끼·녹색 먹빛·한지 배경을 유지했다. 원본과 프롬프트는 `assets/social/`에 보관하며, 참고한 화투 그림의 출처와 CC BY-SA 4.0 표시는 `public/social/LICENSE.txt`에 포함한다. 파일 내용 해시를 주소에 넣어 새 이미지 배포 시 캐시와 구분한다.
 
 `src/app/layout.tsx`의 Open Graph와 Twitter metadata가 같은 이미지를 사용한다. 이미지 주소는 운영 도메인을 기준으로 절대 주소로 출력한다. 방 초대 링크의 쿼리 값을 바꾸지 않도록 공유 metadata에서 별도 `og:url`이나 canonical 주소를 덮어쓰지 않는다.

@@ -107,3 +107,21 @@ it('does not send analytics without explicit new app config', () => {
   trackAnalyticsOnce('game_start', 'id', 'single');
   expect(w.dataLayer).toHaveLength(0);
 });
+it('counts each participant once with only a game mode payload and suppresses offline traffic', () => {
+  for (const seat of [0, 1, 2]) {
+    const w = browser();
+    for (const event of ['game_start', 'game_end'] as const) {
+      trackAnalyticsOnce(event, `secret-seat-${seat}`, 'multi');
+      trackAnalyticsOnce(event, `secret-seat-${seat}`, 'multi');
+    }
+    expect(commands(w).filter((c) => c[0] === 'event')).toEqual([
+      ['event', 'game_start', { game_mode: 'multi' }],
+      ['event', 'game_end', { game_mode: 'multi' }],
+    ]);
+  }
+  const w = browser();
+  vi.stubGlobal('navigator', { onLine: false });
+  initializeAnalytics();
+  trackAnalyticsOnce('game_start', 'secret', 'single');
+  expect(w.dataLayer).toHaveLength(0);
+});

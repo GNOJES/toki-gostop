@@ -1,5 +1,5 @@
 const CACHE = 'toki-gostop-v1-assets-9e079ca12aa0';
-const BUILD = 'e65c8b31b2be2572';
+const BUILD = 'ab4af70a-a490-49f5-9c11-300ec106cc87';
 const CURRENT = `${CACHE}-${BUILD}`;
 const STATIC = ['/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png'];
 const clientCaches = new Map();

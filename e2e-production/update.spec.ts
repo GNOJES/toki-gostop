@@ -36,8 +36,8 @@ test('an open game adopts updated card assets without reload and keeps offline p
   );
   const latestWorker = (await readFile('public/sw.js', 'utf8'))
     .replace(/^const BUILD = .*;$/m, "const BUILD = 'upgrade-test';")
-    .replace(/const CACHE = .*;/, "const CACHE = 'toki-v10-assets-upgrade-test';");
-  const legacyWorker = `const CACHE='toki-legacy-test';
+    .replace(/const CACHE = .*;/, "const CACHE = 'toki-gostop-v1-assets-upgrade-test';");
+  const legacyWorker = `const CACHE='toki-gostop-legacy-test';
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/','/cards/bonus-0.svg']))));
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',e=>{if(new URL(e.request.url).origin!==self.location.origin||e.request.method!=='GET')return;
@@ -109,10 +109,11 @@ self.addEventListener('message',e=>{if(e.data?.type==='CACHE_APP')e.waitUntil(ca
       'OLD CARD',
     );
     await page.evaluate(async () => {
+      await (await caches.open('toki-v10-original')).put('/marker', new Response('matgo'));
       await (await caches.open('another-app')).put('/marker', new Response('keep'));
       for (let i = 0; i < 4; i++)
         await (
-          await caches.open(`toki-obsolete-${i}`)
+          await caches.open(`toki-gostop-obsolete-${i}`)
         ).put(`/_next/static/obsolete-${i}.js`, new Response('old'));
     });
     await page.getByRole('button', { name: /혼자 치기/ }).click();
@@ -126,7 +127,7 @@ self.addEventListener('message',e=>{if(e.data?.type==='CACHE_APP')e.waitUntil(ca
     await expect
       .poll(() =>
         page.evaluate(async () =>
-          (await caches.keys()).some((n) => n.startsWith('toki-v10-assets-upgrade-test-')),
+          (await caches.keys()).some((n) => n.startsWith('toki-gostop-v1-assets-upgrade-test-')),
         ),
       )
       .toBe(true);
@@ -136,7 +137,7 @@ self.addEventListener('message',e=>{if(e.data?.type==='CACHE_APP')e.waitUntil(ca
           .locator('.hand-card img')
           .evaluateAll(
             (imgs) =>
-              imgs.length === 10 &&
+              imgs.length === 7 &&
               imgs.every(
                 (img) =>
                   (img as HTMLImageElement).src.includes('v=feed12345678') &&
@@ -153,12 +154,13 @@ self.addEventListener('message',e=>{if(e.data?.type==='CACHE_APP')e.waitUntil(ca
     expect(bonus).not.toContain('OLD CARD');
     expect(bonus).not.toContain('쌍피');
     const names = await page.evaluate(() => caches.keys());
-    expect(names.some((n) => n.startsWith('toki-v10-assets-upgrade-test-'))).toBe(true);
+    expect(names.some((n) => n.startsWith('toki-gostop-v1-assets-upgrade-test-'))).toBe(true);
     expect(names).toContain('another-app');
+    expect(names).toContain('toki-v10-original');
     await expect
       .poll(() =>
         page.evaluate(
-          async () => (await caches.keys()).filter((n) => n.startsWith('toki-')).length,
+          async () => (await caches.keys()).filter((n) => n.startsWith('toki-gostop-')).length,
         ),
       )
       .toBeLessThanOrEqual(2);
@@ -174,7 +176,7 @@ self.addEventListener('message',e=>{if(e.data?.type==='CACHE_APP')e.waitUntil(ca
           .locator('.hand-card img')
           .evaluateAll(
             (imgs) =>
-              imgs.length === 10 &&
+              imgs.length === 7 &&
               imgs.every(
                 (img) =>
                   (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0,

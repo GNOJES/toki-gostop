@@ -7,7 +7,7 @@ test('GA4 production collects starts and normal ends without invitation data or 
 }) => {
   test.setTimeout(120000);
   // Serve the production build under its real origin, but never contact Google or production.
-  await context.route('https://toki-matgo.vercel.app/**', async (route) => {
+  await context.route('https://gostop-ci.invalid/**', async (route) => {
     const url = new URL(route.request().url());
     const response = await route.fetch({
       url: `http://127.0.0.1:3003${url.pathname}${url.search}`,
@@ -22,7 +22,7 @@ test('GA4 production collects starts and normal ends without invitation data or 
   await context.route(/https:\/\/[^/]*google-analytics\.com\//, (route) => route.abort());
   await context.addInitScript(() => {
     localStorage.setItem(
-      'toki.preferences.v1',
+      'toki-gostop.preferences.v1',
       JSON.stringify({ speed: 'fast', difficulty: 'easy', sound: false, haptic: false }),
     );
     let seed = 12345;
@@ -44,7 +44,7 @@ test('GA4 production collects starts and normal ends without invitation data or 
         .map((c) => Array.from(c))
         .filter((c) => c[0] === 'event'),
     );
-  await page.goto('https://toki-matgo.vercel.app/?source=test');
+  await page.goto('https://gostop-ci.invalid/?source=test');
   await expect.poll(() => tags).toBe(1);
   await page.getByRole('button', { name: /혼자 치기/ }).click();
   await expect.poll(events).toEqual([['event', 'game_start', { game_mode: 'single' }]]);
