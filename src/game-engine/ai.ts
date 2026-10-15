@@ -1,4 +1,5 @@
 import { piValue } from './cards';
+import { otherSeats } from './seats';
 import { calculateScore } from './score';
 import type { Card, GameAction, GameView, PlayerId } from './types';
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -7,8 +8,19 @@ function value(c: Card, view: GameView, player: PlayerId) {
   let v = piValue(c) * 1.4 + (c.isGwang ? 5 : 0) + (c.isYeol ? 2 : 0) + (c.isTti ? 2 : 0);
   if (c.isGodori) v += own.filter((x) => x.isGodori).length * 3;
   if (c.ribbonType !== 'NONE') v += own.filter((x) => x.ribbonType === c.ribbonType).length * 2;
-  if (c.isPi && view.scores[1 - player].piScore > 0 && view.scores[player].piCount <= 7) v += 3;
-  if (c.isGwang && view.scores[1 - player].gwangScore > 0 && !own.some((x) => x.isGwang)) v += 4;
+  if (
+    c.isPi &&
+    otherSeats(player).some((id) => view.scores[id].piScore > 0) &&
+    view.scores[player].piCount >= 1 &&
+    view.scores[player].piCount <= 5
+  )
+    v += 3;
+  if (
+    c.isGwang &&
+    otherSeats(player).some((id) => view.scores[id].gwangScore > 0) &&
+    !own.some((x) => x.isGwang)
+  )
+    v += 4;
   if (c.isYeol && view.scores[player].yeolCount === 6) v += 4;
   return v;
 }
@@ -24,16 +36,16 @@ export function chooseAction(
     const p = view.players[player];
     const keeping = calculateScore({ ...p, hand: [] });
     const converting = calculateScore({ ...p, hand: [], kukjinAsPi: true });
-    return { type: 'SET_KUKJIN', player, asPi: converting.finalScore >= keeping.finalScore };
+    return { type: 'SET_KUKJIN', player, asPi: converting.baseScore >= keeping.baseScore };
   }
   if (view.phase === 'GO_STOP') {
     const own = view.scores[player],
-      other = view.scores[1 - player];
+      other = Math.max(...otherSeats(player).map((id) => view.scores[id].baseScore));
     const go =
       difficulty !== 'easy' &&
       view.players[player].goCount < 2 &&
       view.players[player].turnsRemaining > 2 &&
-      other.baseScore < 5 &&
+      other < 3 &&
       own.baseScore < 12;
     return { type: go ? 'GO' : 'STOP', player };
   }
@@ -76,8 +88,10 @@ export function chooseAction(
         : 0;
       const danger =
         difficulty === 'hard' &&
-        view.players[1 - player].captured.some(
-          (x) => x.ribbonType !== 'NONE' && x.ribbonType === c.ribbonType,
+        otherSeats(player).some((id) =>
+          view.players[id].captured.some(
+            (x) => x.ribbonType !== 'NONE' && x.ribbonType === c.ribbonType,
+          ),
         )
           ? 3
           : 0;

@@ -30,7 +30,7 @@ export function makeGostopFixture(input: {
   const players = input.hands.map((h, i) => ({
     ...makePlayer(),
     hand: cards(h),
-    turnsRemaining: h.filter((id) => !id.startsWith('bonus')).length,
+    turnsRemaining: h.length,
     captured: cards(input.captured?.[i] ?? []),
   })) as GameState['players'];
   const ids = [

@@ -6,12 +6,12 @@ import { chooseAction } from '../src/game-engine/ai';
 const reachChoice = () =>
   applyAction(createFixture('국화 점수 선택'), { type: 'PLAY_CARD', player: 0, cardId: 'm2-0' })
     .nextState;
-it('offers conversion when double pi reaches seven, not immediately on acquisition', () => {
+it('offers conversion when double pi reaches three, not immediately on acquisition', () => {
   const low = createFixture('국화 선택');
   expect(low.phase).toBe('PLAY');
   const s = reachChoice();
   expect(s.phase).toBe('SELECT_KUKJIN');
-  expect(s.players[0].turnsRemaining).toBe(9);
+  expect(s.players[0].turnsRemaining).toBe(6);
   expect(s.currentPlayer).toBe(0);
   expect(() => applyAction(s, { type: 'PASS', player: 0 })).toThrow();
 });
@@ -22,7 +22,7 @@ it('conversion leads to go/stop; keeping advances without spending a second turn
   expect(changed.phase).toBe('GO_STOP');
   const kept = applyAction(s, { type: 'SET_KUKJIN', player: 0, asPi: false }).nextState;
   expect(kept.currentPlayer).toBe(1);
-  expect(kept.players[0].turnsRemaining).toBe(9);
+  expect(kept.players[0].turnsRemaining).toBe(6);
   expect(kept.players[0].kukjinAsPi).toBe(false);
   assertInvariant(kept);
   expect(chooseAction(projectState(s, 0), 0).type).toBe('SET_KUKJIN');

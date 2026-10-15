@@ -1,5 +1,7 @@
 import { CARDS, createDeck, seededRandom, shuffle, piValue } from './cards';
 import { calculateScore } from './score';
+import { nextSeat, otherSeats } from './seats';
+import { settleRound, instantTransfers } from './settlement';
 import {
   RULES,
   type GameState,
@@ -19,12 +21,11 @@ export function emptyPlayer(): PlayerState {
     shakes: [],
     bombs: 0,
     bombPasses: 0,
-    turnsRemaining: 10,
+    turnsRemaining: RULES.handSize,
     ppukCount: 0,
     openingPpukStreak: 0,
     emptyStreak: 0,
     kukjinAsPi: false,
-    sidePoints: 0,
   };
 }
 export function createGame(
@@ -32,83 +33,88 @@ export function createGame(
     seed?: number;
     rng?: () => number;
     dealer?: PlayerId;
-    nagariMultiplier?: number;
+    nagariStreak?: number;
+    gameId?: string;
     deck?: ReturnType<typeof createDeck>;
   } = {},
 ): GameState {
-  const rng = options.rng ?? seededRandom(options.seed ?? Date.now());
-  let a = 1,
-    b = 1;
-  while (a === b) {
-    a = 1 + Math.floor(rng() * 12);
-    b = 1 + Math.floor(rng() * 12);
+  const seed = options.seed ?? Date.now();
+  const rng = options.rng ?? seededRandom(seed);
+  let dealerDraw: GameState['dealerDraw'] = [1, 2, 3];
+  const dealerDrawHistory: GameState['dealerDraw'][] = [];
+  let dealer = options.dealer;
+  if (dealer === undefined) {
+    let candidates: PlayerId[] = [0, 1, 2];
+    for (let tries = 0; ; tries++) {
+      if (tries > 100) throw Error('선 추첨 실패');
+      for (const seat of candidates) dealerDraw[seat] = 1 + Math.floor(rng() * 12);
+      dealerDrawHistory.push([...dealerDraw]);
+      const low = Math.min(...candidates.map((id) => dealerDraw[id]));
+      candidates = candidates.filter((id) => dealerDraw[id] === low);
+      if (candidates.length === 1) {
+        dealer = candidates[0];
+        break;
+      }
+    }
   }
-  const dealer = options.dealer ?? (a < b ? 0 : 1);
   let deck = options.deck ? [...options.deck] : shuffle(createDeck(), rng);
-  let players: [PlayerState, PlayerState], floor: GameState['floor'];
-  for (let tries = 0; ; tries++) {
-    players = [emptyPlayer(), emptyPlayer()];
-    players[0].hand = deck.splice(0, 10);
-    players[1].hand = deck.splice(0, 10);
-    floor = deck.splice(0, 8);
+  for (let tries = 0; tries <= 100; tries++) {
+    const players: GameState['players'] = [emptyPlayer(), emptyPlayer(), emptyPlayer()];
+    for (const p of players) p.hand = deck.splice(0, RULES.handSize);
+    let floor = deck.splice(0, RULES.floorSize);
     while (floor.some((c) => c.isBonus)) {
       const bonus = floor.filter((c) => c.isBonus);
       players[dealer].captured.push(...bonus);
       floor = floor.filter((c) => !c.isBonus);
       floor.push(...deck.splice(0, bonus.length));
     }
-    if (!floor.some((c) => floor.filter((x) => x.month === c.month).length === 4)) break;
-    if (options.deck) throw new Error('초기 바닥 4장: 재분배 필요');
-    if (tries > 100) throw new Error('분배 실패');
-    deck = shuffle(createDeck(), rng);
+    const chong = players.flatMap((p, id) =>
+      p.hand.some((c) => !c.isBonus && p.hand.filter((x) => x.month === c.month).length === 4)
+        ? [id as PlayerId]
+        : [],
+    );
+    const invalidFloor = floor.some((c) => floor.filter((x) => x.month === c.month).length === 4);
+    if (invalidFloor || chong.length > 1) {
+      if (options.deck)
+        throw Error(invalidFloor ? '초기 바닥 4장: 재분배 필요' : '동시 총통: 재분배 필요');
+      deck = shuffle(createDeck(), rng);
+      continue;
+    }
+    const state: GameState = {
+      players,
+      floor,
+      deck,
+      gameId: options.gameId ?? `solo-${seed}`,
+      transactions: [],
+      currentPlayer: dealer,
+      dealer,
+      dealerDraw,
+      dealerDrawHistory,
+      phase: 'PLAY',
+      turn: null,
+      ppukOwners: {},
+      bonusAttachments: {},
+      lastGo: null,
+      nagariStreak: options.nagariStreak ?? 0,
+      stateVersion: 0,
+      turnNumber: 1,
+      result: null,
+    };
+    if (chong.length === 1) finish(state, chong[0], 'CHONGTONG');
+    assertInvariant(state);
+    return state;
   }
-  const s: GameState = {
-    players,
-    floor,
-    deck,
-    currentPlayer: dealer,
-    dealer,
-    dealerDraw: [a, b],
-    phase: 'PLAY',
-    turn: null,
-    ppukOwners: {},
-    bonusAttachments: {},
-    lastGo: null,
-    nagariMultiplier: options.nagariMultiplier ?? 1,
-    stateVersion: 0,
-    turnNumber: 1,
-    result: null,
-  };
-  const chong = players.map((p) =>
-    p.hand.some((c) => !c.isBonus && p.hand.filter((x) => x.month === c.month).length === 4),
-  );
-  if (chong[0] && chong[1]) finish(s, null, 'NAGARI');
-  else if (chong[0] || chong[1]) finish(s, chong[0] ? 0 : 1, 'CHONGTONG', 10);
-  assertInvariant(s);
-  return s;
+  throw Error('분배 실패');
 }
 function finish(
   s: GameState,
   winner: PlayerId | null,
   reason: NonNullable<GameState['result']>['reason'],
-  fixed?: number,
 ) {
+  const settlement = settleRound(s, winner, reason);
+  s.result = { winner, reason, settlement };
+  s.transactions.push(...settlement.transfers);
   s.phase = 'FINISHED';
-  const score =
-    winner === null
-      ? null
-      : calculateScore(s.players[winner], s.players[1 - winner], {
-          lastGo: s.lastGo,
-          playerId: winner,
-          nagariMultiplier: s.nagariMultiplier,
-        });
-  s.result = {
-    winner,
-    reason,
-    score,
-    points: fixed !== undefined ? fixed * s.nagariMultiplier : (score?.finalScore ?? 0),
-    sidePoints: [s.players[0].sidePoints, s.players[1].sidePoints],
-  };
 }
 function matches(s: GameState, month: number) {
   return s.floor.filter((c) => !c.isBonus && c.month === month);
@@ -178,9 +184,17 @@ function reveal(s: GameState, events: GameEvent[]) {
       t.bonuses = [];
       const p = s.players[s.currentPlayer];
       p.ppukCount++;
-      if (p.openingPpukStreak === 10 - p.turnsRemaining) {
+      if (p.openingPpukStreak === RULES.handSize - p.turnsRemaining) {
         p.openingPpukStreak++;
-        p.sidePoints += 7 * p.openingPpukStreak;
+        s.transactions.push(
+          ...instantTransfers(
+            s.gameId,
+            s.stateVersion + 1,
+            s.currentPlayer,
+            'OPENING_PPUK',
+            BigInt(3 * p.openingPpukStreak),
+          ),
+        );
       }
       p.emptyStreak++;
       events.push({ type: 'PPUK_OCCURRED', player: s.currentPlayer, label: '뻑' });
@@ -193,8 +207,10 @@ function reveal(s: GameState, events: GameEvent[]) {
       t.played = null;
       t.revealed = null;
       if (!t.last) t.transfer++;
-      if (s.players[s.currentPlayer].turnsRemaining === 10)
-        s.players[s.currentPlayer].sidePoints += 7;
+      if (s.players[s.currentPlayer].turnsRemaining === RULES.handSize)
+        s.transactions.push(
+          ...instantTransfers(s.gameId, s.stateVersion + 1, s.currentPlayer, 'OPENING_TTADAK', 3n),
+        );
       events.push({ type: 'TTADAK', player: s.currentPlayer, label: '따닥' });
       complete(s, events);
       return;
@@ -270,19 +286,35 @@ function complete(s: GameState, events: GameEvent[]) {
     events.push({ type: 'CARDS_CAPTURED', player: s.currentPlayer, cards: [...t.captured] });
   }
   t.captured = [];
-  const other = s.players[1 - s.currentPlayer],
-    mine = s.players[s.currentPlayer];
-  let remaining = t.transfer;
-  while (remaining > 0) {
-    const pi = other.captured
-      .filter((c) => piValue(c, other.kukjinAsPi) > 0)
-      .sort((a, b) => piValue(a, other.kukjinAsPi) - piValue(b, other.kukjinAsPi))[0];
-    if (!pi) break;
-    other.captured = other.captured.filter((c) => c.id !== pi.id);
-    mine.captured.push(pi);
-    if (pi.specialType === 'KUKJIN') mine.kukjinAsPi = true;
-    remaining -= piValue(pi, other.kukjinAsPi);
-    events.push({ type: 'PI_TRANSFERRED', player: s.currentPlayer, cards: [pi] });
+  const mine = s.players[s.currentPlayer];
+  for (const from of otherSeats(s.currentPlayer)) {
+    const other = s.players[from];
+    let remaining = t.transfer;
+    const cards: GameState['floor'] = [];
+    let actualPi = 0;
+    while (remaining > 0) {
+      const pi = other.captured
+        .filter((c) => piValue(c, other.kukjinAsPi) > 0)
+        .sort((a, b) => piValue(a, other.kukjinAsPi) - piValue(b, other.kukjinAsPi))[0];
+      if (!pi) break;
+      const value = piValue(pi, other.kukjinAsPi);
+      other.captured = other.captured.filter((c) => c.id !== pi.id);
+      mine.captured.push(pi);
+      cards.push(pi);
+      actualPi += value;
+      remaining -= value;
+      if (pi.specialType === 'KUKJIN') mine.kukjinAsPi = true;
+    }
+    if (cards.length)
+      events.push({
+        type: 'PI_TRANSFERRED',
+        player: s.currentPlayer,
+        from,
+        to: s.currentPlayer,
+        cards,
+        requestedPi: t.transfer,
+        actualPi,
+      });
   }
   if (!events.some((e) => e.type === 'CARDS_CAPTURED')) mine.emptyStreak++;
   else mine.emptyStreak = 0;
@@ -298,9 +330,7 @@ function endTurn(s: GameState, events: GameEvent[]) {
     points: calculateScore(p).baseScore,
   });
   if (p.ppukCount >= 3) {
-    finish(s, s.currentPlayer, 'THREE_PPUK', 7);
-  } else if (p.emptyStreak >= 5) {
-    finish(s, s.currentPlayer, 'HEODANG', 7);
+    finish(s, s.currentPlayer, 'THREE_PPUK');
   } else {
     decideScore(s, events, true);
   }
@@ -337,9 +367,10 @@ function advance(s: GameState, events: GameEvent[]) {
     finish(s, null, 'NAGARI');
     return;
   }
-  s.currentPlayer = (1 - s.currentPlayer) as PlayerId;
-  if (s.players[s.currentPlayer].turnsRemaining === 0)
-    s.currentPlayer = (1 - s.currentPlayer) as PlayerId;
+  s.currentPlayer = nextSeat(
+    s.currentPlayer,
+    s.players.map((p) => p.turnsRemaining) as [number, number, number],
+  )!;
   s.phase = 'PLAY';
 }
 export function applyAction(state: GameState, action: GameAction): ActionResult {
@@ -509,6 +540,19 @@ export function assertInvariant(s: GameState) {
     ids.some((id) => !CARDS.some((c) => c.id === id))
   )
     throw new Error(`카드 invariant 위반 (${ids.length}/${new Set(ids).size})`);
+  if (
+    s.players.length !== 3 ||
+    new Set(s.transactions.map((t) => t.id)).size !== s.transactions.length
+  )
+    throw Error('Player/transaction invariant');
+  for (const t of s.transactions)
+    if (
+      t.amount <= 0n ||
+      t.from === t.to ||
+      ![0, 1, 2].includes(t.from) ||
+      ![0, 1, 2].includes(t.to)
+    )
+      throw Error('Transaction invariant');
   s.players.forEach((p) => {
     if (
       p.turnsRemaining < 0 ||
@@ -524,6 +568,8 @@ export function projectState(s: GameState, player: PlayerId): GameView {
     return { ...rest, handCount: hand.length };
   }) as GameView['players'];
   return {
+    gameId: s.gameId,
+    transactions: structuredClone(s.transactions),
     players: publicPlayers,
     hand: [...s.players[player].hand],
     floor: [...s.floor],
@@ -542,14 +588,8 @@ export function projectState(s: GameState, player: PlayerId): GameView {
     stateVersion: s.stateVersion,
     turnNumber: s.turnNumber,
     result: s.result,
-    nagariMultiplier: s.nagariMultiplier,
+    nagariStreak: s.nagariStreak,
     lastGo: s.lastGo,
-    scores: s.players.map((p, id) =>
-      calculateScore(p, s.players[1 - id], {
-        playerId: id,
-        lastGo: s.lastGo,
-        nagariMultiplier: s.nagariMultiplier,
-      }),
-    ) as GameView['scores'],
+    scores: s.players.map((p) => calculateScore(p)) as GameView['scores'],
   };
 }

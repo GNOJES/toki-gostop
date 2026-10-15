@@ -7,6 +7,7 @@ import {
   emptyPlayer,
   projectState,
 } from '../src/game-engine/engine';
+import { settleRound } from '../src/game-engine/settlement';
 import { calculateScore } from '../src/game-engine/score';
 import { chooseAction } from '../src/game-engine/ai';
 import type { GameState, PlayerState, Card } from '../src/game-engine/types';
@@ -34,18 +35,20 @@ function fixture(
     captured: CARDS.filter((c) => !used.has(c.id)),
   };
   return {
-    players: [p, other],
+    players: [p, other, { ...emptyPlayer(), turnsRemaining: 0 }],
+    gameId: 'test',
+    transactions: [],
     floor: cards(...floor),
     deck: cards(...draw),
     currentPlayer: 0,
     dealer: 0,
-    dealerDraw: [1, 2],
+    dealerDraw: [1, 2, 3],
     phase: 'PLAY',
     turn: null,
     ppukOwners: {},
     bonusAttachments: {},
     lastGo: null,
-    nagariMultiplier: 1,
+    nagariStreak: 0,
     stateVersion: 0,
     turnNumber: 1,
     result: null,
@@ -74,8 +77,8 @@ describe('deck & setup', () => {
   it('initial deal and bonus pickup conserve all cards', () => {
     for (let seed = 1; seed < 100; seed++) {
       const s = createGame({ seed });
-      expect(s.players.map((p) => p.hand.length)).toEqual([10, 10]);
-      expect(s.floor).toHaveLength(8);
+      expect(s.players.map((p) => p.hand.length)).toEqual([7, 7, 7]);
+      expect(s.floor).toHaveLength(6);
       expect(s.floor.some((c) => c.isBonus)).toBe(false);
       assertInvariant(s);
     }
@@ -90,31 +93,31 @@ describe('deck & setup', () => {
       }
     }
     expect(s).toBeDefined();
-    expect(s!.floor).toHaveLength(8);
+    expect(s!.floor).toHaveLength(6);
   });
   it.each([0, 1] as const)(
-    'dealer %i captures consecutive opening bonuses and refills eight floor cards',
+    'dealer %i captures consecutive opening bonuses and refills six floor cards',
     (dealer) => {
       const regular = CARDS.filter((c) => !c.isBonus).sort(
         (a, b) => Number(a.id.split('-')[1]) - Number(b.id.split('-')[1]),
       );
       const deck = [
-        ...regular.slice(0, 20),
+        ...regular.slice(0, 21),
         ...cards('bonus-0'),
-        ...regular.slice(20, 27),
+        ...regular.slice(21, 26),
         ...cards('bonus-1'),
-        ...regular.slice(27),
+        ...regular.slice(26),
       ];
       const s = createGame({ deck, dealer });
       expect(s.players[dealer].captured.map((c) => c.id)).toEqual(['bonus-0', 'bonus-1']);
       expect(s.players[1 - dealer].captured).toHaveLength(0);
-      expect(s.floor).toHaveLength(8);
+      expect(s.floor).toHaveLength(6);
       expect(s.floor.some((c) => c.isBonus)).toBe(false);
-      expect(s.deck).toHaveLength(20);
+      expect(s.deck).toHaveLength(21);
       assertInvariant(s);
     },
   );
-  it('initial chongtong ends at 10 without continuing', () => {
+  it('initial chongtong ends at five per opponent without continuing', () => {
     const head = cards('m1-0', 'm1-1', 'm1-2', 'm1-3');
     const deck = [
       ...head,
@@ -125,7 +128,7 @@ describe('deck & setup', () => {
     ];
     const s = createGame({ deck, dealer: 0 });
     expect(s.result?.reason).toBe('CHONGTONG');
-    expect(s.result?.points).toBe(10);
+    expect(s.result?.settlement.liabilities).toEqual([0n, 5n, 5n]);
   });
 });
 describe('matching and special events', () => {
@@ -182,14 +185,18 @@ describe('matching and special events', () => {
     s.ppukOwners[1] = owner;
     s.bonusAttachments['bonus-0'] = 1;
     const r = play(s, 'm1-3');
-    expect(r.events.filter((e) => e.type === 'PI_TRANSFERRED')).toHaveLength(owner === 0 ? 2 : 1);
+    expect(
+      r.events.filter((e) => e.type === 'PI_TRANSFERRED').flatMap((e) => e.cards ?? []),
+    ).toHaveLength(owner === 0 ? 2 : 1);
     expect(r.nextState.players[0].captured.some((c) => c.id === 'bonus-0')).toBe(true);
   });
   it('jjok / sweep emit separate transfers', () => {
     const r = play(fixture(['m1-2', 'm2-2'], [], ['m1-3']), 'm1-2');
     expect(r.events.map((e) => e.type)).toContain('JJOK');
     expect(r.events.map((e) => e.type)).toContain('SWEEP');
-    expect(r.events.filter((e) => e.type === 'PI_TRANSFERRED')).toHaveLength(2);
+    expect(
+      r.events.filter((e) => e.type === 'PI_TRANSFERRED').flatMap((e) => e.cards ?? []),
+    ).toHaveLength(2);
   });
   it('ttadak collects four after hand selection', () => {
     const s = fixture(['m1-2', 'm2-2'], ['m1-0', 'm1-1', 'm3-2'], ['m1-3']);
@@ -210,7 +217,7 @@ describe('matching and special events', () => {
     const r = applyAction(s, { type: 'PLAY_CARD', player: 0, cardId: 'm1-0', shake: true });
     expect(r.nextState.players[0].shakes).toEqual([1]);
     expect(r.events[0].cards).toHaveLength(3);
-    expect(calculateScore(r.nextState.players[0]).shakeMultiplier).toBe(2);
+    expect(settleRound(r.nextState, 0, 'STOP').commonMultiplier).toBe(2n);
   });
   it('three-card bomb gives two pass rights, no two-card bomb', () => {
     const s = fixture(['m1-0', 'm1-1', 'm1-2'], ['m1-3', 'm3-2'], ['m4-2', 'm5-2', 'm6-2']);
@@ -232,18 +239,20 @@ describe('matching and special events', () => {
     const s = fixture(['m1-2', 'm2-2'], ['m1-0'], ['m1-1'], { ppukCount: 2 });
     const r = play(s, 'm1-2');
     expect(r.nextState.result?.reason).toBe('THREE_PPUK');
-    expect(r.nextState.result?.points).toBe(7);
+    expect(r.nextState.result?.settlement.liabilities).toEqual([0n, 3n, 3n]);
   });
-  it('first ppuk awards side score and first ttadak awards 7', () => {
+  it('first ppuk awards three to each opponent', () => {
     const s = fixture(['m1-2', 'm2-2'], ['m1-0'], ['m1-1']);
-    s.players[0].turnsRemaining = 10;
-    s.players[0].bombPasses = 8;
+    s.players[0].turnsRemaining = 7;
+    s.players[0].bombPasses = 5;
     const r = play(s, 'm1-2');
-    expect(r.nextState.players[0].sidePoints).toBe(7);
+    expect(
+      r.nextState.transactions.filter((t) => t.kind === 'INSTANT').map((t) => t.amount),
+    ).toEqual([3n, 3n]);
   });
-  it('fifth empty turn is heodang', () => {
+  it('fifth empty turn does not award heodang', () => {
     const s = fixture(['m1-2', 'm2-2'], ['m3-2'], ['m4-2'], { emptyStreak: 4 });
-    expect(play(s, 'm1-2').nextState.result?.reason).toBe('HEODANG');
+    expect(play(s, 'm1-2').nextState.phase).not.toBe('FINISHED');
   });
   it('both out of turns without score is nagari', () => {
     expect(play(fixture(['m1-2'], ['m3-2'], ['m4-2']), 'm1-2').nextState.result?.reason).toBe(
@@ -304,9 +313,10 @@ describe('score fixtures', () => {
     [4, 2, 4],
     [5, 2, 8],
   ])('%i go bonus %i multiplier %i', (goCount, bonus, mult) => {
-    const r = calculateScore({ ...emptyPlayer(), goCount });
-    expect(r.goBonus).toBe(bonus);
-    expect(r.goMultiplier).toBe(mult);
+    const s = fixture([], [], [], { goCount });
+    const r = settleRound(s, 0, 'STOP');
+    expect(r.commonMultiplier).toBe(BigInt(mult));
+    expect(r.liabilities[2]).toBe(BigInt(bonus * mult));
   });
   it('combined multipliers fixed calculation order', () => {
     const p = scored(
@@ -330,9 +340,13 @@ describe('score fixtures', () => {
       ],
       { goCount: 3, shakes: [2], bombs: 1 },
     );
-    const r = calculateScore(p, emptyPlayer(), { lastGo: 1, playerId: 0, nagariMultiplier: 2 });
+    const s = fixture([], [], [], p);
+    s.players[1] = { ...emptyPlayer(), turnsRemaining: 0 };
+    s.lastGo = 1;
+    s.nagariStreak = 1;
+    const r = settleRound(s, 0, 'STOP');
     expect(r.baseScore).toBe(12);
-    expect(r.finalScore).toBe((12 + 2) * 2 * 4 * 2 * 2 * 2 * 2 * 2);
+    expect(r.roundDelta).toEqual([1792n, -1792n, 0n]);
   });
   it('kukjin conversion is action-validated and irreversible', () => {
     const s = fixture(['m1-2', 'm2-2'], ['m3-2'], ['m4-2'], { captured: cards('m9-0') });
@@ -378,30 +392,34 @@ describe('validation / security / AI simulations', () => {
   });
 });
 describe('additional rule regressions', () => {
-  it('first three consecutive ppuks settle 7 + 14 + 21 plus fixed 7 = 49', () => {
+  it('first three consecutive ppuks settle three six nine plus final three per opponent', () => {
     let s = fixture(['m1-2', 'm2-2', 'm3-2'], ['m1-0', 'm2-0', 'm3-0'], ['m1-1', 'm2-1', 'm3-1'], {
-      turnsRemaining: 10,
-      bombPasses: 7,
+      turnsRemaining: 7,
+      bombPasses: 4,
     });
     for (const id of ['m1-2', 'm2-2', 'm3-2']) s = play(s, id).nextState;
     expect(s.result?.reason).toBe('THREE_PPUK');
-    expect(s.result?.sidePoints[0]).toBe(42);
-    expect(s.result!.points + s.result!.sidePoints[0]).toBe(49);
+    expect(
+      s.transactions.filter((t) => t.kind === 'INSTANT').reduce((n, t) => n + t.amount, 0n),
+    ).toBe(36n);
+    expect(s.result!.settlement.roundDelta).toEqual([42n, -21n, -21n]);
   });
-  it('opening ttadak awards 7 and steals one pi', () => {
+  it('opening ttadak awards three per opponent and steals one pi', () => {
     const s = fixture(['m1-2', 'm2-2'], ['m1-0', 'm1-1', 'm3-2'], ['m1-3'], {
-      turnsRemaining: 10,
-      bombPasses: 8,
+      turnsRemaining: 7,
+      bombPasses: 5,
     });
     const r = applyAction(play(s, 'm1-2').nextState, {
       type: 'SELECT_FLOOR',
       player: 0,
       cardId: 'm1-0',
     });
-    expect(r.nextState.players[0].sidePoints).toBe(7);
+    expect(
+      r.nextState.transactions.filter((t) => t.kind === 'INSTANT').map((t) => t.amount),
+    ).toEqual([3n, 3n]);
     expect(r.events.filter((e) => e.type === 'PI_TRANSFERRED')).toHaveLength(1);
   });
-  it('7+ score pauses, GO needs more base score, STOP preserves arithmetic', () => {
+  it('3+ score pauses, GO needs more base score, STOP preserves arithmetic', () => {
     let s = fixture(['m1-2', 'm2-2', 'm4-2'], ['m5-2'], ['m6-2', 'm7-2'], {
       captured: cards('m1-0', 'm3-0', 'm8-0', 'm2-0', 'm4-0', 'm8-1'),
     });
@@ -442,16 +460,15 @@ describe('additional rule regressions', () => {
       'm1-2',
       'm1-3',
     ]);
-    const seven = scored(['m2-2', 'm2-3', 'm3-2', 'm3-3', 'm4-2', 'm4-3', 'm5-2']);
-    expect(calculateScore(p, seven).pibakMultiplier).toBe(2);
-    expect(
-      calculateScore(p, { ...seven, captured: [...seven.captured, ...cards('m5-3')] })
-        .pibakMultiplier,
-    ).toBe(1);
-    expect(
-      calculateScore(p, { ...seven, captured: [...seven.captured, ...cards('m12-0')] })
-        .gwangbakMultiplier,
-    ).toBe(1);
+    const s = fixture([], [], [], p);
+    const five = scored(['m2-2', 'm2-3', 'm3-2', 'm3-3', 'm4-2']);
+    s.players[1] = five;
+    const r = settleRound(s, 0, 'STOP');
+    expect(r.liabilities[1]).toBe(16n);
+    s.players[1].captured.push(...cards('m4-3'));
+    expect(settleRound(s, 0, 'STOP').liabilities[1]).toBe(8n);
+    s.players[1].captured.push(...cards('m12-0'));
+    expect(settleRound(s, 0, 'STOP').liabilities[1]).toBe(4n);
   });
 });
 it('normal event order makes matching and draw readable before capture/score', () => {

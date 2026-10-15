@@ -24,8 +24,9 @@ export function createFixture(name: FixtureName, seed = 12345): GameState {
       seededRandom(seed),
     );
     s.floor = floor;
-    s.players[0].hand = remaining.splice(0, 10);
-    s.players[1].hand = remaining.splice(0, 10);
+    s.players[0].hand = remaining.splice(0, 7);
+    s.players[1].hand = remaining.splice(0, 7);
+    s.players[2].hand = remaining.splice(0, 7);
     s.players.forEach((p) => {
       p.captured = [];
     });
@@ -56,13 +57,13 @@ export function createFixture(name: FixtureName, seed = 12345): GameState {
     },
     '국화 선택': {
       hand: ['m2-0'],
-      floor: ['m1-0', 'm4-0', 'm5-0', 'm6-0', 'm7-0', 'm8-0', 'm10-0', 'm11-0'],
+      floor: ['m1-0', 'm4-0', 'm5-0', 'm6-0', 'm7-0', 'm8-0'],
       draw: ['m3-0'],
       opponent: [],
     },
     '국화 점수 선택': {
       hand: ['m2-0'],
-      floor: ['m1-0', 'm4-0', 'm5-0', 'm6-0', 'm7-0', 'm8-0', 'm10-0', 'm11-0'],
+      floor: ['m1-0', 'm4-0', 'm5-0', 'm6-0', 'm7-0', 'm8-0'],
       draw: ['m3-0'],
       opponent: [],
     },
@@ -78,7 +79,7 @@ export function createFixture(name: FixtureName, seed = 12345): GameState {
   const captured = name.startsWith('국화')
     ? [
         CARDS.find((c) => c.specialType === 'KUKJIN')!,
-        ...(name === '국화 점수 선택' ? CARDS.filter((c) => c.piValue === 1).slice(0, 15) : []),
+        ...(name === '국화 점수 선택' ? CARDS.filter((c) => c.piValue === 1).slice(0, 10) : []),
       ]
     : [];
   const used = new Set([...hand, ...floor, ...draw, ...opponent, ...captured].map((c) => c.id));
@@ -97,11 +98,13 @@ export function createFixture(name: FixtureName, seed = 12345): GameState {
       target.push(...remaining.splice(i, 1));
     }
   }
-  fill(hand, 10, true);
-  fill(opponent, 10, true);
-  fill(floor, 8, false);
+  fill(hand, 7, true);
+  fill(opponent, 7, true);
+  const third: Card[] = [];
+  fill(third, 7, true);
+  fill(floor, 6, false);
   const s = createGame({
-    deck: [...hand, ...opponent, ...floor, ...draw, ...remaining, ...captured],
+    deck: [...hand, ...opponent, ...third, ...floor, ...draw, ...remaining, ...captured],
     dealer: 0,
     seed,
   });
@@ -125,8 +128,8 @@ export function createCustomDeal(
   input: { hand: string[]; floor: string[]; draw: string[] },
   seed = 12345,
 ): GameState {
-  if (input.hand.length !== 10 || input.floor.length !== 8)
-    throw Error('내 손패 10장 / 바닥 8장을 지정해주세요.');
+  if (input.hand.length !== 7 || input.floor.length !== 6)
+    throw Error('내 손패 7장 / 바닥 6장을 지정해주세요.');
   const ids = [...input.hand, ...input.floor, ...input.draw];
   if (new Set(ids).size !== ids.length) throw Error('중복 카드 ID가 있어요.');
   const resolve = (list: string[]) =>
@@ -139,11 +142,12 @@ export function createCustomDeal(
     CARDS.filter((c) => !ids.includes(c.id)),
     seededRandom(seed),
   );
-  if (remaining.length < 10) throw Error('상대 손패에 필요한 10장을 남겨주세요.');
+  if (remaining.length < 14) throw Error('상대 둘의 손패에 필요한 14장을 남겨주세요.');
   return createGame({
     deck: [
       ...resolve(input.hand),
-      ...remaining.splice(0, 10),
+      ...remaining.splice(0, 7),
+      ...remaining.splice(0, 7),
       ...resolve(input.floor),
       ...resolve(input.draw),
       ...remaining,

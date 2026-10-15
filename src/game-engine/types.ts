@@ -91,6 +91,7 @@ export interface GameState {
   currentPlayer: PlayerId;
   dealer: PlayerId;
   dealerDraw: SeatTuple<number>;
+  dealerDrawHistory?: SeatTuple<number>[];
   phase: 'PLAY' | 'SELECT_FLOOR' | 'SELECT_KUKJIN' | 'GO_STOP' | 'FINISHED';
   /** Manual conversion asks for Go before the player has spent this turn. */
   continueTurnAfterGo?: boolean;
@@ -111,6 +112,10 @@ export type GameAction =
   | { type: 'GO' | 'STOP'; player: PlayerId }
   | { type: 'SET_KUKJIN'; player: PlayerId; asPi?: boolean };
 export interface GameEvent {
+  from?: SeatId;
+  to?: SeatId;
+  requestedPi?: number;
+  actualPi?: number;
   type: string;
   player: PlayerId;
   cards?: Card[];
@@ -136,6 +141,7 @@ export interface GameView {
   currentPlayer: PlayerId;
   dealer: PlayerId;
   dealerDraw: SeatTuple<number>;
+  dealerDrawHistory?: SeatTuple<number>[];
   phase: GameState['phase'];
   options: string[];
   turnCards: Card[];
