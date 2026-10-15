@@ -1,4 +1,24 @@
-export type PlayerId = 0 | 1;
+export type SeatId = 0 | 1 | 2;
+export type PlayerId = SeatId;
+export type SeatTuple<T> = [T, T, T];
+export type Points = bigint;
+export type EndReason = 'STOP' | 'NAGARI' | 'CHONGTONG' | 'THREE_PPUK';
+export interface PointTransfer {
+  id: string;
+  from: SeatId;
+  to: SeatId;
+  amount: Points;
+  kind: 'INSTANT' | 'FINAL';
+  reason: 'OPENING_PPUK' | 'OPENING_TTADAK' | EndReason;
+}
+export interface RoundSettlement {
+  baseScore: number;
+  commonMultiplier: Points;
+  liabilities: SeatTuple<Points>;
+  payerFor: SeatTuple<SeatId | null>;
+  transfers: PointTransfer[];
+  roundDelta: SeatTuple<Points>;
+}
 export type Category = 'GWANG' | 'YEOL' | 'TTI' | 'PI' | 'BONUS';
 export type RibbonType = 'HONGDAN' | 'CHEONGDAN' | 'CHODAN' | 'NONE';
 export interface Card {
@@ -29,7 +49,6 @@ export interface PlayerState {
   openingPpukStreak: number;
   emptyStreak: number;
   kukjinAsPi: boolean;
-  sidePoints: number;
 }
 export interface TurnState {
   played: Card | null;
@@ -44,7 +63,7 @@ export interface TurnState {
   stage: 'hand' | 'deck';
   options: string[];
 }
-export interface ScoreResult {
+export interface ScoreBreakdown {
   gwangScore: number;
   yeolScore: number;
   godoriScore: number;
@@ -56,30 +75,22 @@ export interface ScoreResult {
   piCount: number;
   yeolCount: number;
   baseScore: number;
-  goBonus: number;
-  goMultiplier: number;
-  shakeMultiplier: number;
-  pibakMultiplier: number;
-  gwangbakMultiplier: number;
-  meongttaMultiplier: number;
-  gobakMultiplier: number;
-  nagariMultiplier: number;
-  finalScore: number;
 }
+export type ScoreResult = ScoreBreakdown;
 export interface GameResult {
-  winner: PlayerId | null;
-  reason: 'STOP' | 'NAGARI' | 'CHONGTONG' | 'THREE_PPUK' | 'HEODANG';
-  score: ScoreResult | null;
-  points: number;
-  sidePoints: [number, number];
+  winner: SeatId | null;
+  reason: EndReason;
+  settlement: RoundSettlement;
 }
 export interface GameState {
-  players: [PlayerState, PlayerState];
+  gameId: string;
+  transactions: PointTransfer[];
+  players: SeatTuple<PlayerState>;
   floor: Card[];
   deck: Card[];
   currentPlayer: PlayerId;
   dealer: PlayerId;
-  dealerDraw: [number, number];
+  dealerDraw: SeatTuple<number>;
   phase: 'PLAY' | 'SELECT_FLOOR' | 'SELECT_KUKJIN' | 'GO_STOP' | 'FINISHED';
   /** Manual conversion asks for Go before the player has spent this turn. */
   continueTurnAfterGo?: boolean;
@@ -87,7 +98,7 @@ export interface GameState {
   ppukOwners: Record<number, PlayerId>;
   bonusAttachments: Record<string, number>;
   lastGo: PlayerId | null;
-  nagariMultiplier: number;
+  nagariStreak: number;
   stateVersion: number;
   turnNumber: number;
   result: GameResult | null;
@@ -115,27 +126,24 @@ export interface PlayerView extends Omit<PlayerState, 'hand'> {
   handCount: number;
 }
 export interface GameView {
-  players: [PlayerView, PlayerView];
+  gameId: string;
+  transactions: PointTransfer[];
+  players: SeatTuple<PlayerView>;
   hand: Card[];
   floor: Card[];
   deckCount: number;
   bonusAttachments: Record<string, number>;
   currentPlayer: PlayerId;
   dealer: PlayerId;
-  dealerDraw: [number, number];
+  dealerDraw: SeatTuple<number>;
   phase: GameState['phase'];
   options: string[];
   turnCards: Card[];
   stateVersion: number;
   turnNumber: number;
   result: GameResult | null;
-  nagariMultiplier: number;
+  nagariStreak: number;
   lastGo: PlayerId | null;
-  scores: [ScoreResult, ScoreResult];
+  scores: SeatTuple<ScoreBreakdown>;
 }
-export interface RuleConfig {
-  stopScore: number;
-  bonusCount: number;
-  bonusPiValue: number;
-}
-export const RULES: RuleConfig = { stopScore: 7, bonusCount: 2, bonusPiValue: 2 };
+export { RULES } from './rules';
