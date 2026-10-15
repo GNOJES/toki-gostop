@@ -1,4 +1,4 @@
-import type { Card } from '../game-engine/types';
+import type { Card, SeatId } from '../game-engine/types';
 export interface FlightGeometry {
   fromX: number;
   fromY: number;
@@ -14,6 +14,7 @@ export function cardFlight(
   kind: 'play' | 'flip' | 'capture' | 'transfer' | 'bonus' | 'bonus-capture',
   mine: boolean,
   targetId?: string,
+  seats?: { actor: SeatId; from?: SeatId; to?: SeatId; me: SeatId },
 ): FlightGeometry {
   const board = document.querySelector('.floor-area')?.getBoundingClientRect();
   if (!board) return { fromX: 0, fromY: 0, toX: 0, toY: 0, width: 48, height: 75 };
@@ -31,16 +32,24 @@ export function cardFlight(
           : card?.isTti
             ? 2
             : 3;
-  const pile = document
-    .querySelectorAll('.captured')
-    [mine ? 1 : 0]?.querySelectorAll('.captured-group')[group];
+  const actor = seats?.actor;
+  const targetSeat = seats?.to ?? actor;
+  const panel = (seat: SeatId | undefined) =>
+    seat === undefined ? null : document.querySelector(`[data-player-seat="${seat}"]`);
+  const pile = seats
+    ? panel(targetSeat)?.querySelectorAll('.captured-group')[group]
+    : document.querySelectorAll('.captured')[mine ? 1 : 0]?.querySelectorAll('.captured-group')[
+        group
+      ];
   const hand = mine
     ? document.querySelector(`[data-card-id="${card?.id}"] .hwatu`)
-    : document.querySelector('[data-testid="opponent-hand"]');
+    : seats
+      ? panel(actor)?.querySelector('[data-testid="opponent-hand"]')
+      : document.querySelector('[data-testid="opponent-hand"]');
   const deck = document.querySelector('.deck .hwatu');
-  const opponentPi = document
-    .querySelectorAll('.captured')
-    [mine ? 0 : 1]?.querySelectorAll('.captured-group')[3];
+  const opponentPi = seats
+    ? panel(seats.from)?.querySelectorAll('.captured-group')[3]
+    : document.querySelectorAll('.captured')[mine ? 0 : 1]?.querySelectorAll('.captured-group')[3];
   const stolen = opponentPi?.querySelector(`[data-captured-card-id="${card?.id}"] .hwatu`);
   const source =
     kind === 'play' || kind === 'bonus'

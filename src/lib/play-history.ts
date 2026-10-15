@@ -13,9 +13,18 @@ export interface PlayRecord {
   ruleVersion: string;
   delta: SeatTuple<string>;
 }
+export interface InstantRecord {
+  gameId: string;
+  at: number;
+  mode: 'single' | 'multi';
+  names: SeatTuple<string>;
+  me: SeatId;
+  transfer: Omit<PointTransfer, 'amount'> & { amount: string };
+}
 export interface PlayHistory {
   solo: { wins: number; losses: number; draws: number; points: string };
   recent: PlayRecord[];
+  instant: InstantRecord[];
 }
 export interface ProgressInput {
   gameId: string;
@@ -29,6 +38,7 @@ export interface ProgressInput {
 export const emptyHistory = (): PlayHistory => ({
   solo: { wins: 0, losses: 0, draws: 0, points: '0' },
   recent: [],
+  instant: [],
 });
 export function parseHistory(raw: string | null): PlayHistory {
   try {
@@ -62,7 +72,29 @@ export function parseHistory(raw: string | null): PlayHistory {
         }
       })
       .slice(0, 100);
-    return { solo: { ...h.solo }, recent };
+    const instant = (Array.isArray(h.instant) ? h.instant : []).filter((r: InstantRecord) => {
+      try {
+        return (
+          typeof r.gameId === 'string' &&
+          Number.isSafeInteger(r.at) &&
+          r.at >= 0 &&
+          r.at <= 8640000000000000 &&
+          ['single', 'multi'].includes(r.mode) &&
+          [0, 1, 2].includes(r.me) &&
+          r.names.length === 3 &&
+          r.names.every((n) => typeof n === 'string') &&
+          typeof r.transfer.id === 'string' &&
+          r.transfer.kind === 'INSTANT' &&
+          [0, 1, 2].includes(r.transfer.from) &&
+          [0, 1, 2].includes(r.transfer.to) &&
+          r.transfer.from !== r.transfer.to &&
+          decodePoints(r.transfer.amount) > 0n
+        );
+      } catch {
+        return false;
+      }
+    });
+    return { solo: { ...h.solo }, recent, instant };
   } catch {
     return emptyHistory();
   }
@@ -73,12 +105,25 @@ export function applyProgress(
   seen: Set<string>,
   done: Set<string>,
 ): PlayHistory {
-  const h: PlayHistory = { solo: { ...history.solo }, recent: [...history.recent] };
+  const h: PlayHistory = {
+    solo: { ...history.solo },
+    recent: [...history.recent],
+    instant: [...history.instant],
+  };
   let points = BigInt(h.solo.points);
   for (const t of input.transactions) {
     if (seen.has(t.id)) continue;
     if (t.amount <= 0n || t.from === t.to) throw Error('Invalid transfer');
     seen.add(t.id);
+    if (t.kind === 'INSTANT')
+      h.instant.unshift({
+        gameId: input.gameId,
+        at: input.at ?? Date.now(),
+        mode: input.mode,
+        names: [...input.names],
+        me: input.me,
+        transfer: { ...t, amount: t.amount.toString() },
+      });
     if (input.mode === 'single') {
       if (t.to === input.me) points += t.amount;
       if (t.from === input.me) points -= t.amount;
@@ -108,4 +153,5 @@ export function applyProgress(
 export const resetSolo = (h: PlayHistory): PlayHistory => ({
   solo: emptyHistory().solo,
   recent: h.recent.filter((r) => r.mode !== 'single'),
+  instant: h.instant.filter((r) => r.mode !== 'single'),
 });

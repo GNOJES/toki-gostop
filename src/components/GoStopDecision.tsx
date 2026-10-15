@@ -16,13 +16,7 @@ export function GoStopDecision({
   deferPopup?: boolean;
 }) {
   const [showCards, setShowCards] = useState(false);
-  const multipliers = [
-    score.pibakMultiplier > 1 ? '피박 ×2' : '',
-    score.gwangbakMultiplier > 1 ? '광박 ×2' : '',
-    score.meongttaMultiplier > 1 ? '멍따 ×2' : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const multipliers = '';
   const decision = (
     <section
       className={`go-stop-decision${showCards ? '' : ' go-stop-expanded'}`}
@@ -32,7 +26,7 @@ export function GoStopDecision({
         <strong>
           {score.baseScore}점 · 현재 {goCount}고
         </strong>
-        <span>스톱하면 {score.finalScore}점</span>
+        <span>스톱하면 이번 판을 마쳐요</span>
         {multipliers && <small>{multipliers}</small>}
       </div>
       <button

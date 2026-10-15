@@ -1,4 +1,2 @@
-import { MatgoApp } from '../components/MatgoApp';
-export default function Page() {
-  return <MatgoApp />;
-}
+import {GostopApp} from '../components/GostopApp';
+export default function Page(){return <GostopApp/>;}

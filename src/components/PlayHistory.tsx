@@ -7,7 +7,6 @@ const reasons = {
   NAGARI: '나가리',
   CHONGTONG: '총통',
   THREE_PPUK: '3뻑',
-  HEODANG: '허당',
 };
 export function PlayHistory({
   history,
@@ -34,7 +33,13 @@ export function PlayHistory({
               총 {rounds}판 · 누적 {solo.points}점
             </span>
           </p>
-          <button className="secondary" disabled={!rounds} onClick={() => setConfirm(true)}>
+          <button
+            className="secondary"
+            disabled={
+              !rounds && solo.points === '0' && !history.instant.some((r) => r.mode === 'single')
+            }
+            onClick={() => setConfirm(true)}
+          >
             혼자 치기 기록 초기화
           </button>
         </section>
@@ -46,16 +51,23 @@ export function PlayHistory({
             {history.recent.map((r) => (
               <li key={r.id}>
                 <div>
-                  <strong className={`history-outcome ${r.outcome}`}>
-                    {r.outcome === 'win' ? '승리' : r.outcome === 'loss' ? '패배' : '무승부'}
+                  <strong
+                    className={`history-outcome ${r.winner === null ? 'draw' : r.winner === r.me ? 'win' : 'loss'}`}
+                  >
+                    {(r.winner === null ? 'draw' : r.winner === r.me ? 'win' : 'loss') === 'win'
+                      ? '승리'
+                      : (r.winner === null ? 'draw' : r.winner === r.me ? 'win' : 'loss') === 'loss'
+                        ? '패배'
+                        : '무승부'}
                   </strong>
                   <span>
-                    {r.mode === 'single' ? '혼자 치기' : '친구와 치기'} · {r.opponent}
+                    {r.mode === 'single' ? '혼자 치기' : '친구와 치기'} ·{' '}
+                    {r.names.filter((_, id) => id !== r.me).join(' · ')}
                   </span>
                 </div>
                 <div>
                   <span>
-                    {reasons[r.reason]} · {r.points}점
+                    {reasons[r.reason]} · {r.delta[r.me]}점
                   </span>
                   <time dateTime={new Date(r.at).toISOString()}>
                     {new Date(r.at).toLocaleString('ko-KR', {
@@ -71,6 +83,25 @@ export function PlayHistory({
           </ol>
         ) : (
           <p className="history-empty">아직 끝낸 판이 없어요. 한 판 즐기고 기록을 남겨보세요.</p>
+        )}
+        {history.instant.length > 0 && (
+          <section aria-label="확정 즉시 점수">
+            <h3>확정 즉시 점수</h3>
+            <p className="fine-print">
+              중단한 판도 남아요. 완료 판 정산에는 이미 포함된 점수예요. 최근 100건을 표시해요.
+            </p>
+            <ol className="history-list instant-list">
+              {history.instant.slice(0, 100).map((r) => (
+                <li key={r.transfer.id}>
+                  <span>
+                    {r.mode === 'single' ? '혼자 치기' : '친구와 치기'} · {r.names[r.transfer.from]}{' '}
+                    → {r.names[r.transfer.to]}
+                  </span>
+                  <strong>{r.transfer.amount}점</strong>
+                </li>
+              ))}
+            </ol>
+          </section>
         )}
       </Modal>
       {confirm && (

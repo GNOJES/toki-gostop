@@ -3,43 +3,26 @@ import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import { get, ref, runTransaction } from 'firebase/database';
 import { createFixture } from '../src/game-engine/fixtures';
 import { applyAction } from '../src/game-engine/engine';
+import { decodeState } from '../src/multiplayer/state-codec';
+import { friendTable, synchronized } from './three-player-helper';
 import { encodeState } from '../src/multiplayer/host';
 
 test('mandatory chrysanthemum choice releases the screen on disconnect and resumes unchanged', async ({
   browser,
 }) => {
-  const a = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    isMobile: true,
-    hasTouch: true,
-    reducedMotion: 'reduce',
-  });
-  const b = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    isMobile: true,
-    hasTouch: true,
-    reducedMotion: 'reduce',
-  });
+  const room = await friendTable(browser);
+  const [a, b] = room.contexts;
+  const [pa, pb, pc] = room.pages;
+  const { code } = room;
   const env = await initializeTestEnvironment({
-    projectId: 'demo-toki-matgo',
-    database: { host: '127.0.0.1', port: 9000 },
+    projectId: 'demo-toki-gostop',
+    database: { host: '127.0.0.1', port: 9100 },
   });
   try {
-    const pa = await a.newPage(),
-      pb = await b.newPage();
-    await pa.addInitScript(() => localStorage.setItem('toki.firebase.owned.v1', '{}'));
-    await pa.goto('/');
-    await pa.getByRole('button', { name: /친구와 치기/ }).click();
-    await pa.getByRole('button', { name: /방 만들기/ }).click();
-    await expect(pa.getByTestId('room-code')).toBeVisible({ timeout: 15000 });
-    const code = await pa.getByTestId('room-code').innerText();
-    await pb.goto(`/?room=${code}`);
-    await pb.getByRole('button', { name: /참여하기/ }).click();
-    await expect(pa.getByTestId('game-table')).toBeVisible();
-    await expect(pb.getByTestId('game-table')).toBeVisible();
+    await synchronized(room.pages);
     await env.withSecurityRulesDisabled(async (context) => {
       const location = ref(
-        context.database('https://demo-toki-matgo-default-rtdb.firebaseio.com'),
+        context.database('https://demo-toki-gostop-default-rtdb.firebaseio.com'),
         `rooms/${code}/state`,
       );
       const initial = await get(location);
@@ -47,12 +30,15 @@ test('mandatory chrysanthemum choice releases the screen on disconnect and resum
       await runTransaction(
         location,
         (value) => {
-          const state = JSON.parse((value ?? initial.val()).data);
+          const state = decodeState({ state: value ?? initial.val() });
+          const oldGame = state.game!;
           state.game = applyAction(createFixture('국화 점수 선택'), {
             type: 'PLAY_CARD',
             player: 0,
             cardId: 'm2-0',
           }).nextState;
+          state.game.gameId = oldGame.gameId;
+          state.game.stateVersion = oldGame.stateVersion + 1;
           state.events = [{ type: 'KUKJIN_REQUIRED', player: 0 }];
           state.revision++;
           return encodeState(state);
@@ -78,12 +64,12 @@ test('mandatory chrysanthemum choice releases the screen on disconnect and resum
     await pa.getByRole('button', { name: '나가기', exact: true }).click();
     await pa.getByRole('button', { name: '대기실로', exact: true }).click();
     await expect(pb.getByRole('button', { name: '홈으로 돌아가기', exact: true })).toBeVisible();
+    await expect(pc.getByRole('button', { name: '홈으로 돌아가기', exact: true })).toBeVisible();
     await pb.getByRole('button', { name: '홈으로 돌아가기', exact: true }).click();
     await expect(pb.getByRole('button', { name: /혼자 치기/ })).toBeVisible();
     await expect(pb.locator('.error-toast')).toHaveCount(0);
   } finally {
-    await a.close();
-    await b.close();
+    await room.close();
     await env.cleanup();
   }
 });

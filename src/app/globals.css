@@ -1819,3 +1819,103 @@ strong {
   padding-left: 7px;
   white-space: nowrap;
 }
+
+/* Three-player table: seat IDs, rather than DOM order, anchor every flight. */
+.game-table {
+  grid-template-rows: 48px 94px minmax(0, 1fr) 24px 90px 160px 30px;
+}
+.opponents {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+.opponent-panel {
+  min-width: 0;
+  border-bottom: 1px solid #f4f5dd25;
+}
+.opponent-panel .player-info {
+  height: 32px;
+  font-size: 11px;
+  gap: 3px;
+}
+.opponent-panel .player-name {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.opponent-panel .player-name-text {
+  max-width: 76px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.opponent-panel .win-count {
+  display: none;
+}
+.opponent-panel .captured {
+  height: 56px;
+  gap: 2px;
+}
+.opponent-panel .captured-group {
+  min-width: 0;
+}
+.opponent-panel .mini-stack {
+  transform: scale(0.76);
+  transform-origin: left top;
+  width: 125%;
+}
+.own-panel .player-info {
+  height: 30px;
+}
+.own-panel .captured {
+  height: 60px;
+}
+.hand-grid {
+  grid-template-columns: repeat(4, var(--play-card-width));
+  justify-content: center;
+}
+.settlement-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.settlement-table th,
+.settlement-table td {
+  text-align: right;
+  padding: 7px 3px;
+}
+.settlement-table th:first-child {
+  text-align: left;
+  max-width: 90px;
+  overflow-wrap: anywhere;
+}
+@media (max-height: 700px) {
+  .game-table {
+    --play-card-width: 40px;
+    grid-template-rows: 44px 86px minmax(0, 1fr) 24px 80px 138px 28px;
+  }
+  .own-panel .captured {
+    height: 50px;
+  }
+  .opponent-panel .captured {
+    height: 50px;
+  }
+}
+@media (max-height: 610px) {
+  .game-table {
+    --play-card-width: 34px;
+    grid-template-rows: 44px 80px minmax(0, 1fr) 24px 74px 120px 26px;
+  }
+  .own-panel .player-info {
+    height: 26px;
+  }
+  .own-panel .captured {
+    height: 48px;
+  }
+  .opponent-panel .player-info {
+    height: 28px;
+  }
+  .opponent-panel .captured {
+    height: 46px;
+  }
+}

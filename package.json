@@ -5,11 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
-    "dev:server": "tsx watch server/index.ts",
     "build": "NEXT_BUILD_DIR=.next-prod next build && node scripts/build-offline-shell.mjs .next-prod && node scripts/prepare-standalone.mjs",
     "build:vercel": "next build && node scripts/build-offline-shell.mjs .next",
     "start": "HOSTNAME=0.0.0.0 node .next-prod/standalone/server.js",
-    "start:server": "tsx server/index.ts",
     "test": "vitest run",
     "test:e2e": "firebase emulators:exec --only auth,database --project demo-toki-gostop \"playwright test\"",
     "typecheck": "tsc --noEmit",
@@ -29,8 +27,6 @@
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1",
     "tsx": "^4.20.0"
   },
   "devDependencies": {

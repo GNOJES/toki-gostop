@@ -58,7 +58,7 @@ test('mobile in-app browser keeps guidance and all cards separate as toolbars re
     const { board, guide, floor, deck, hands } = geometry;
     expect(guide.top).toBeGreaterThanOrEqual(board.bottom);
     expect(geometry.scrollHeight).toBe(height);
-    expect(hands).toHaveLength(10);
+    expect(hands).toHaveLength(7);
     for (const card of [...floor, deck, ...hands]) {
       expect(card.top).toBeGreaterThanOrEqual(0);
       expect(card.bottom, JSON.stringify({ width, height, card, geometry })).toBeLessThanOrEqual(

@@ -28,7 +28,10 @@ export async function observeFlights(page: Page) {
         const r = target.getBoundingClientRect();
         return [r.left + r.width / 2, r.top + r.height / 2];
       };
-      const piles = document.querySelectorAll('.captured');
+      const piles = [
+        document.querySelector('.opponent-panel .captured')!,
+        document.querySelector('.own-panel .captured')!,
+      ];
       const style = el.style;
       const width = parseFloat(style.getPropertyValue('--motion-width'));
       const height = parseFloat(style.getPropertyValue('--motion-height'));

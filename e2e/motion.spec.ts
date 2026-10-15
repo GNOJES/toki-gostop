@@ -117,7 +117,7 @@ test('mobile native close requests dismiss hand popup then confirm return to lob
   for (let i = 0; i < 3; i++) {
     if (await page.evaluate(() => 'CloseWatcher' in window)) await page.keyboard.press('Escape');
     else await page.goBack();
-    await expect(page.getByRole('link', { name: '토끼맞고 홈' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '토끼고스톱 홈' })).toBeVisible();
   }
 });
 
@@ -132,8 +132,8 @@ for (const draw of ['m1-2', 'm12-0'])
     await page.getByText('직접 패 분배', { exact: true }).click();
     await page.getByRole('textbox', { name: '직접 패 분배 JSON' }).fill(
       JSON.stringify({
-        hand: ['m8-0', 'm8-1', 'm8-2', 'm9-0', 'm9-1', 'm9-2', 'm10-0', 'm10-1', 'm10-2', 'm11-0'],
-        floor: ['m1-0', 'm1-1', 'm2-0', 'm3-0', 'm4-0', 'm5-0', 'm6-0', 'm7-0'],
+        hand: ['m8-0', 'm8-1', 'm8-2', 'm9-0', 'm9-1', 'm9-2', 'm11-0'],
+        floor: ['m1-0', 'm1-1', 'm2-0', 'm3-0', 'm4-0', 'm5-0'],
         draw: [draw],
       }),
     );
@@ -179,8 +179,8 @@ for (const stage of ['hand', 'deck'])
     const played = stage === 'hand' ? 'm1-0' : 'm11-0';
     await page.getByRole('textbox', { name: '직접 패 분배 JSON' }).fill(
       JSON.stringify({
-        hand: [played, 'm8-0', 'm8-1', 'm8-2', 'm9-0', 'm9-1', 'm9-2', 'm10-0', 'm10-1', 'm10-2'],
-        floor: ['m1-2', 'm1-3', 'm2-0', 'm3-0', 'm4-0', 'm5-0', 'm6-0', 'm7-0'],
+        hand: [played, 'm8-0', 'm8-1', 'm8-2', 'm9-0', 'm9-1', 'm9-2'],
+        floor: ['m1-2', 'm1-3', 'm2-0', 'm3-0', 'm4-0', 'm5-0'],
         draw: [stage === 'hand' ? 'm12-0' : 'm1-0'],
       }),
     );

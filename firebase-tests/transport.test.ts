@@ -106,7 +106,7 @@ it('real Auth three seats automatically start, recover, finish, vote next round 
           .every((m) => m?.canAct && m.game?.stateVersion === messages[0]?.game?.stateVersion),
       )
       .toBe(true);
-    if (messages[0]!.game!.phase === 'FINISHED') break;
+    if (String(messages[0]!.game!.phase) === 'FINISHED') break;
     const current = messages[0]!.game!.currentPlayer,
       m = messages[current]!;
     const action = chooseAction(m.game!, current, 'easy');

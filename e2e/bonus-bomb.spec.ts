@@ -4,6 +4,7 @@ import { observeFlights, recordedFlight } from './flight-observer';
 
 async function fixture(page: Page, name: string) {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.addInitScript(() => localStorage.setItem('toki-gostop.preferences.v1', JSON.stringify({speed:'fast',difficulty:'easy',sound:false,haptic:false})));
   await page.goto('/?debug=1');
   await startDebugGame(page);
   await page.getByRole('button', { name: '개발', exact: true }).click();
@@ -32,7 +33,7 @@ test('mobile bonus pauses at center then enters own captured pi without landing 
   await expect(page.locator('[data-floor-card-id="bonus-0"]')).toHaveCount(0);
   await expect(page.getByTestId('game-table')).toHaveAttribute('data-busy', 'false');
   await expect(
-    page.locator('.captured').nth(1).locator('[data-captured-card-id="bonus-0"]'),
+    page.locator('.own-panel .captured').locator('[data-captured-card-id="bonus-0"]'),
   ).toBeVisible();
 });
 
@@ -61,8 +62,9 @@ test('mobile bomb creates two playable hand tokens and stolen pi flies from oppo
   await expect(page.locator('.bomb-pass')).toHaveCount(2);
   await expect(page.locator('.pass-button')).toHaveCount(0);
   await expect(
-    page.locator('.captured').nth(1).locator(`[data-captured-card-id="${stolen}"]`),
+    page.locator('.own-panel .captured').locator(`[data-captured-card-id="${stolen}"]`),
   ).toBeVisible();
+  await expect(page.getByTestId('game-table')).toHaveAttribute('data-can-act', 'true');
   await page.locator('.bomb-pass').first().click();
   await expect(page.locator('.bomb-pass')).toHaveCount(1);
   await page.screenshot({ path: '/tmp/toki-bomb-board.png' });

@@ -1,37 +1,11 @@
+import { seedHistory } from './history-helper';
 import { test, expect } from '@playwright/test';
 
 test('mobile recent records menu fits below play buttons and Back closes records and reset confirmation', async ({
   page,
   context,
 }) => {
-  await context.addInitScript(() => {
-    localStorage.setItem(
-      'toki.play-history.v1',
-      JSON.stringify({
-        solo: { wins: 1, losses: 0, draws: 0, points: 7, opponentPoints: 0 },
-        recent: [
-          {
-            id: 'solo',
-            at: 1000,
-            mode: 'single',
-            opponent: '토끼',
-            outcome: 'win',
-            points: 7,
-            reason: 'STOP',
-          },
-          {
-            id: 'friend',
-            at: 2000,
-            mode: 'multi',
-            opponent: '친구',
-            outcome: 'loss',
-            points: 3,
-            reason: 'STOP',
-          },
-        ],
-      }),
-    );
-  });
+  await seedHistory(page);
   for (const [width, height] of [
     [360, 740],
     [390, 844],
@@ -55,9 +29,9 @@ test('mobile recent records menu fits below play buttons and Back closes records
   await history.getByRole('button', { name: '혼자 치기 기록 초기화', exact: true }).click();
   await page.getByRole('button', { name: '기록 초기화', exact: true }).click();
   await expect(history).toContainText('총 0판');
-  await expect(history.locator('.history-list li')).toHaveCount(1);
+  await expect(history.locator('.history-list:not(.instant-list) li')).toHaveCount(1);
   await expect(history).toContainText('친구와 치기');
   await page.goBack();
   await expect(history).toHaveCount(0);
-  await expect(page.getByRole('link', { name: '토끼맞고 홈' })).toBeVisible();
+  await expect(page.getByRole('link', { name: '토끼고스톱 홈' })).toBeVisible();
 });

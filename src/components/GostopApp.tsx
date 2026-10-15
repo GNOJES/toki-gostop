@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { flushSync } from 'react-dom';
 import QRCode from 'qrcode';
-import { readHistory, updateHistory } from '../lib/history-store';
+import { readHistory, persistGameProgress, resetSoloHistory } from '../lib/history-store';
 import { registerPwa } from '../lib/register-pwa';
 import { trackAnalyticsOnce } from '../lib/analytics';
 import { cardFlight, type FlightGeometry } from '../lib/card-motion';
@@ -20,13 +20,18 @@ import { PlayHistory } from './PlayHistory';
 import {
   HISTORY_KEY,
   emptyHistory,
-  addResult,
-  soloStats,
-  resetSolo,
   type PlayHistory as History,
+  type ProgressInput,
 } from '../lib/play-history';
+import { useGamePresenter } from '../lib/game-presenter';
+import { useGameSession, useCpuTurn } from '../lib/use-game-session';
+import { PlayerPanel } from './PlayerPanel';
+import { RoomLobby } from './RoomLobby';
+import { GameTable } from './GameTable';
+import { RoundResult } from './RoundResult';
+import { otherSeats } from '../game-engine/seats';
 import { CARDS } from '../game-engine/cards';
-import { applyAction, createGame, projectState } from '../game-engine/engine';
+import { applyAction, assertInvariant, createGame, projectState } from '../game-engine/engine';
 import { chooseAction } from '../game-engine/ai';
 import { calculateScore } from '../game-engine/score';
 import {
@@ -49,26 +54,9 @@ import type { MultiplayerTransport, RoomMessage, Stats } from '../multiplayer/ty
 interface SavedRoom {
   code: string;
   uid: string;
+  roomId?: string;
 }
-const eventLabel: Record<string, string> = {
-  CARD_PLAYED: '패를 내려놓아요',
-  FLOOR_MATCHED: '같은 무늬를 만났어요',
-  DECK_CARD_REVEALED: '뒤집은 패를 확인해요',
-  CARDS_CAPTURED: '패를 걷어와요',
-  PI_TRANSFERRED: '상대 피를 가져와요',
-  SCORE_CHANGED: '점수를 확인해요',
-  TURN_ENDED: '다음 차례',
-  FLOOR_MATCH_REQUIRED: '먹을 바닥패를 골라주세요',
-};
-const effectDetails: Record<string, string> = {
-  BOMB: '세 장을 한 번에!',
-  SWEEP: '바닥패를 모두 획득!',
-  JJOK: '뒤집은 패까지 한 쌍!',
-  TTADAK: '같은 월 네 장 획득!',
-  PPUK_OCCURRED: '세 장이 바닥에 남아요',
-  SHAKE: '승리하면 점수 두 배!',
-};
-const emptyStats: Stats = { wins: [0, 0], points: [0, 0] };
+const emptyStats: Stats = { wins: [0, 0, 0], points: [0n, 0n, 0n] };
 function storeItem(key: string, value: string | null) {
   try {
     if (value === null) localStorage.removeItem(key);
@@ -82,7 +70,7 @@ function getItem(key: string) {
     return null;
   }
 }
-export function MatgoApp() {
+export function GostopApp() {
   const [screen, setScreen] = useState<'home' | 'friends' | 'lobby' | 'game'>('home');
   const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
   const prefsRef = useRef(prefs);
@@ -92,7 +80,9 @@ export function MatgoApp() {
   const [room, setRoom] = useState<RoomMessage | null>(null);
   const [view, setView] = useState<GameView | null>(null);
   const viewRef = useRef<GameView | null>(null);
-  const logical = useRef<GameState | null>(null);
+  const { logical, createSolo, applyLocal } = useGameSession();
+  const soloStatsRef = useRef<Stats>(structuredClone(emptyStats));
+  const appliedSolo = useRef(new Set<string>());
   const [me, setMe] = useState<PlayerId>(0);
   const meRef = useRef<PlayerId>(0);
   const [mode, setMode] = useState<'single' | 'multi'>('single');
@@ -175,312 +165,64 @@ export function MatgoApp() {
     setPrefs(p);
     savePreferences(p);
   };
-  const present = useCallback(
-    (next: GameView, events: GameEvent[], newRound = false) => {
-      const epoch = generation.current;
-      if (!events.length) {
-        if (!busyRef.current || newRound) publish(next);
-        return;
+  const present = useGamePresenter({
+    generation,
+    queue,
+    viewRef,
+    busyRef,
+    skipRef,
+    prefsRef,
+    meRef,
+    modeRef,
+    roundRef,
+    multiplayer,
+    waitingFlight,
+    publish,
+    setBusy,
+    setMotion,
+    setStruck,
+    setLanding,
+    setHighlight,
+    setStatus,
+    setSpecialEffect,
+    setImpact,
+    setLog,
+    setError,
+  });
+  const saveResult = useCallback((input: ProgressInput) => {
+    if (input.result) trackAnalyticsOnce('game_end', input.gameId, input.mode);
+    if (input.mode === 'single') {
+      const next = structuredClone(soloStatsRef.current);
+      for (const t of input.transactions)
+        if (!appliedSolo.current.has(t.id)) {
+          appliedSolo.current.add(t.id);
+          next.points[t.from] -= t.amount;
+          next.points[t.to] += t.amount;
+        }
+      if (input.result && !recorded.current.has(input.gameId)) {
+        recorded.current.add(input.gameId);
+        if (input.result.winner !== null) next.wins[input.result.winner]++;
       }
-      busyRef.current = true;
-      setBusy(true);
-      queue.current = queue.current
-        .then(async () => {
-          if (epoch !== generation.current) return;
-          let shown = structuredClone(viewRef.current ?? next);
-          let motionKey = Date.now();
-          const factor =
-            skipRef.current && process.env.NODE_ENV === 'development'
-              ? 0
-              : window.matchMedia('(prefers-reduced-motion: reduce)').matches
-                ? 0.12
-                : prefsRef.current.speed === 'physical'
-                  ? 1
-                  : prefsRef.current.speed === 'normal'
-                    ? 0.65
-                    : 0.35;
-          const pause = async (ms: number) => {
-            if (factor) await new Promise<void>((resolve) => setTimeout(resolve, ms * factor));
-            return epoch === generation.current;
-          };
-          for (const e of events) {
-            if (epoch !== generation.current) return;
-            setLog((old) => [...old.slice(-100), e]);
-            setStatus(e.label ?? eventLabel[e.type] ?? '');
-            setHighlight(e.cards?.map((c) => c.id) ?? []);
-            if (effectDetails[e.type])
-              setSpecialEffect({ label: e.label ?? e.type, detail: effectDetails[e.type] });
-            const mine = e.player === meRef.current;
-            const ids = new Set(e.cards?.map((c) => c.id));
-            const fly = async (
-              cards: HwatuCard[],
-              source: FlightGeometry,
-              targetId?: string,
-              deck = false,
-            ) => {
-              if (!cards.length) return true;
-              const c = cards[0];
-              // Reserve a real empty slot before measuring its final layout.
-              if (!targetId && !shown.floor.some((f) => f.id === c.id)) {
-                shown.floor.push(c);
-                flushSync(() => {
-                  setLanding(c.id);
-                  publish({ ...shown });
-                });
-                targetId = c.id;
-              }
-              const geometry = cardFlight(cards, deck ? 'flip' : 'play', mine, targetId);
-              // Keep the original source even when the hand/deck changed during a choice.
-              const centerX = source.fromX + source.width / 2;
-              const centerY = source.fromY + source.height / 2;
-              geometry.fromX = centerX - geometry.width / 2;
-              geometry.fromY = centerY - geometry.height / 2;
-              const strikes = [
-                { angle: -14, dx: -6, dy: 4, swing: -16 },
-                { angle: 12, dx: 7, dy: -3, swing: 18 },
-                { angle: -9, dx: 4, dy: 6, swing: -10 },
-                { angle: 17, dx: -5, dy: 1, swing: 14 },
-              ];
-              const strike = strikes[Math.floor(Math.random() * strikes.length)];
-              setMotion({
-                key: motionKey++,
-                cards,
-                kind: targetId === c.id ? 'place' : 'play',
-                other: !mine,
-                geometry,
-                duration: 440 * factor,
-                strike,
-              });
-              if (!(await pause(320))) return false;
-              if (targetId !== c.id)
-                setImpact({
-                  key: motionKey,
-                  x: geometry.toX + geometry.width / 2,
-                  y: geometry.toY + geometry.height / 2,
-                });
-              feedback(prefsRef.current);
-              if (!(await pause(120))) return false;
-              if (targetId !== c.id && targetId)
-                setStruck((old) => ({ ...old, [targetId!]: { card: c, ...strike } }));
-              publish({ ...shown });
-              setLanding(null);
-              setMotion(null);
-              return pause(140);
-            };
-            if (e.type === 'CARD_PLAYED' || e.type === 'BOMB') {
-              const cards = e.cards ?? [];
-              const source = cardFlight(cards, cards[0]?.isBonus ? 'bonus' : 'play', mine);
-              const choice = events.some(
-                (event) => event.type === 'FLOOR_MATCH_REQUIRED' && event.stage === 'hand',
-              );
-              const match = events.find(
-                (event) => event.type === 'FLOOR_MATCHED' && event.stage === 'hand',
-              );
-              if (mine) shown.hand = shown.hand.filter((c) => !ids.has(c.id));
-              else
-                shown.players[e.player].handCount = Math.max(
-                  0,
-                  shown.players[e.player].handCount - cards.length,
-                );
-              publish({ ...shown });
-              if (cards[0]?.isBonus) {
-                setStatus('보너스 쌍피');
-                setMotion({
-                  key: motionKey++,
-                  cards,
-                  kind: 'bonus',
-                  other: !mine,
-                  geometry: source,
-                  duration: 360 * factor,
-                });
-                if (!(await pause(360))) return;
-                if (!(await pause(650))) return;
-              } else if (choice) {
-                waitingFlight.current.hand = { cards, geometry: source, mine };
-                setMotion({
-                  key: motionKey++,
-                  cards,
-                  kind: 'waiting',
-                  other: !mine,
-                  geometry: source,
-                  duration: 0,
-                });
-              } else if (
-                !(await fly(
-                  cards,
-                  source,
-                  match?.cards?.[1]?.id ??
-                    (e.type === 'BOMB'
-                      ? shown.floor.find((c) => c.month === cards[0]?.month)?.id
-                      : undefined),
-                ))
-              )
-                return;
-            } else if (e.type === 'DECK_CARD_REVEALED') {
-              const cards = e.cards ?? [];
-              const source = cardFlight(cards, 'flip', mine);
-              shown.deckCount = Math.max(0, shown.deckCount - 1);
-              publish({ ...shown });
-              setMotion({
-                key: motionKey++,
-                cards,
-                kind: 'flip',
-                other: !mine,
-                geometry: source,
-                duration: 420 * factor,
-              });
-              if (!(await pause(420))) return;
-              if (!(await pause(180))) return;
-              if (cards[0]?.isBonus) {
-                setMotion(null);
-                continue;
-              }
-              const choice = events.some(
-                (event) => event.type === 'FLOOR_MATCH_REQUIRED' && event.stage === 'deck',
-              );
-              const match = events.find(
-                (event) =>
-                  event.type === 'FLOOR_MATCHED' &&
-                  event.stage === 'deck' &&
-                  event.cards?.[0]?.id === cards[0]?.id,
-              );
-              if (choice) {
-                waitingFlight.current.deck = { cards, geometry: source, mine };
-                setMotion({
-                  key: motionKey++,
-                  cards,
-                  kind: 'waiting',
-                  other: !mine,
-                  geometry: source,
-                  duration: 0,
-                });
-              } else if (
-                !(await fly(
-                  cards,
-                  source,
-                  match?.cards?.[1]?.id ??
-                    shown.floor.find((c) => c.month === cards[0]?.month && !c.isBonus)?.id,
-                  true,
-                ))
-              )
-                return;
-            } else if (
-              e.type === 'CARDS_CAPTURED' ||
-              e.type === 'PI_TRANSFERRED' ||
-              e.type === 'BONUS_CAPTURED'
-            ) {
-              const kind =
-                e.type === 'PI_TRANSFERRED'
-                  ? 'transfer'
-                  : e.type === 'BONUS_CAPTURED'
-                    ? 'bonus-capture'
-                    : 'capture';
-              setMotion({
-                key: motionKey++,
-                cards: e.cards ?? [],
-                kind,
-                other: !mine,
-                geometry: cardFlight(e.cards ?? [], kind, mine),
-                duration: 450 * factor,
-              });
-              feedback(prefsRef.current);
-              if (!(await pause(450))) return;
-              setStruck((old) =>
-                Object.fromEntries(
-                  Object.entries(old).filter(
-                    ([target, hit]) => !ids.has(target) && !ids.has(hit.card.id),
-                  ),
-                ),
-              );
-              shown.floor = shown.floor.filter((c) => !ids.has(c.id));
-              shown.players[1 - e.player].captured = shown.players[1 - e.player].captured.filter(
-                (c) => !ids.has(c.id),
-              );
-              for (const c of e.cards ?? [])
-                if (!shown.players[e.player].captured.some((x) => x.id === c.id))
-                  shown.players[e.player].captured.push(c);
-              publish({ ...shown });
-              setMotion(null);
-            } else if (e.type === 'FLOOR_MATCHED') {
-              const stage = e.stage ?? 'hand';
-              const waiting = waitingFlight.current[stage];
-              if (waiting && waiting.cards[0]?.id === e.cards?.[0]?.id) {
-                delete waitingFlight.current[stage];
-                if (
-                  !(await fly(waiting.cards, waiting.geometry, e.cards?.[1]?.id, stage === 'deck'))
-                )
-                  return;
-              }
-            } else if (e.type === 'SCORE_CHANGED') {
-              shown.scores[e.player] = next.scores[e.player];
-              publish({ ...shown });
-              if (!(await pause(350))) return;
-            } else if (e.label) {
-              feedback(prefsRef.current, 'special');
-              if (!(await pause(850))) return;
-            }
-          }
-          if (epoch !== generation.current) return;
-          publish(next);
-          if (next.phase !== 'SELECT_FLOOR') {
-            setMotion(null);
-            setStruck({});
-            setImpact(null);
-            waitingFlight.current = {};
-          }
-          setLanding(null);
-          setHighlight([]);
-          setStatus('');
-          setSpecialEffect(null);
-          setImpact(null);
-          busyRef.current = false;
-          setBusy(false);
-          if (modeRef.current === 'multi')
-            void multiplayer.current
-              ?.ready(roundRef.current, next.stateVersion)
-              .catch(() => setError('연결을 복구하고 있어요.'));
-        })
-        .catch(() => {
-          if (epoch === generation.current) {
-            publish(next);
-            setBusy(false);
-            busyRef.current = false;
-            setMotion(null);
-            setStruck({});
-            setImpact(null);
-            setLanding(null);
-            waitingFlight.current = {};
-            setStatus('');
-            setHighlight([]);
-            setSpecialEffect(null);
-            setError('패 이동을 복구했어요. 계속 칠 수 있어요.');
-            if (modeRef.current === 'multi')
-              void multiplayer.current
-                ?.ready(roundRef.current, next.stateVersion)
-                .catch(() => setError('연결을 복구하고 있어요.'));
-          }
-        });
-    },
-    [publish],
-  );
-  const saveResult = useCallback((input: Parameters<typeof addResult>[1]) => {
-    if (recorded.current.has(input.id)) return;
-    recorded.current.add(input.id);
-    trackAnalyticsOnce('game_end', input.id, input.mode);
-    void updateHistory((h) => addResult(h, input))
+      soloStatsRef.current = next;
+      setStats(next);
+    }
+    void persistGameProgress(input)
       .then((next) => {
         historyRef.current = next;
         setPlayHistory(next);
-        if (modeRef.current === 'single') setStats(soloStats(next));
       })
-      .catch(() => {
-        recorded.current.delete(input.id);
-        setError('이번 판 기록을 저장하지 못했어요. 브라우저 저장 공간을 확인해주세요.');
-      });
+      .catch(() => setError('기록을 저장하지 못했어요.'));
   }, []);
   const connectRoom = useCallback(
     (code?: string, _uid?: string, name?: string) => {
+      if (!navigator.onLine) {
+        setEntering(false);
+        setScreen('friends');
+        setError('친구와 치기는 인터넷에 연결한 뒤 시작해주세요.');
+        return;
+      }
       const attempt = ++connectionAttempt.current;
+      const expectedRoomId = _uid ? saved.current?.roomId : undefined;
       setEntering(true);
       setError('');
       setConnected(false);
@@ -502,6 +244,20 @@ export function MatgoApp() {
                 },
                 state: (data: RoomMessage) => {
                   if (attempt !== connectionAttempt.current) return;
+                  if (expectedRoomId && expectedRoomId !== data.roomId) {
+                    connectionAttempt.current++;
+                    multiplayer.current?.dispose();
+                    saved.current = null;
+                    storeItem('toki-gostop.firebase.room.v1', null);
+                    setEntering(false);
+                    setScreen('friends');
+                    setError('이전에 참여했던 방은 종료되었어요.');
+                    return;
+                  }
+                  if (saved.current?.code === data.code) {
+                    saved.current = { ...saved.current, roomId: data.roomId };
+                    storeItem('toki-gostop.firebase.room.v1', JSON.stringify(saved.current));
+                  }
                   const newRound = roundRef.current !== data.round;
                   roundRef.current = data.round;
                   setRound(data.round);
@@ -511,6 +267,15 @@ export function MatgoApp() {
                   meRef.current = data.me;
                   setMe(data.me);
                   setEntering(false);
+                  if (data.game)
+                    saveResult({
+                      gameId: data.game.gameId,
+                      mode: 'multi',
+                      names: data.names,
+                      me: data.me,
+                      transactions: data.transactions,
+                      result: data.game.result,
+                    });
                   if (data.closed) {
                     generation.current++;
                     busyRef.current = false;
@@ -525,7 +290,7 @@ export function MatgoApp() {
                     setError('방이 종료되었어요. 대기실로 돌아가 새 방을 만들어주세요.');
                     return;
                   }
-                  if (!_uid && (!code || data.me === 1))
+                  if (!_uid && (!code || data.me !== 0))
                     trackAnalyticsOnce(
                       code ? 'room_join' : 'room_create',
                       `room:${data.code}:${data.expiresAt}:${data.me}`,
@@ -537,14 +302,6 @@ export function MatgoApp() {
                       `multi:${data.code}:${data.expiresAt}:${data.round}:${data.me}`,
                       'multi',
                     );
-                    if (data.game.result)
-                      saveResult({
-                        id: `multi:${data.code}:${data.expiresAt}:${data.round}:${data.me}`,
-                        mode: 'multi',
-                        opponent: data.names[1 - data.me],
-                        me: data.me,
-                        result: data.game.result,
-                      });
                     setScreen('game');
                     if (newRound) {
                       floorLayout.current = new Map();
@@ -564,7 +321,7 @@ export function MatgoApp() {
                 },
               },
               code,
-              name ?? getItem('toki.nickname.v1') ?? '',
+              name ?? getItem('toki-gostop.nickname.v1') ?? '',
               !!_uid,
             );
             if (attempt !== connectionAttempt.current) {
@@ -573,7 +330,7 @@ export function MatgoApp() {
             }
             multiplayer.current = transport;
             saved.current = { code: transport.code, uid: transport.uid };
-            storeItem('toki.firebase.room.v1', JSON.stringify(saved.current));
+            storeItem('toki-gostop.firebase.room.v1', JSON.stringify(saved.current));
           } catch (error) {
             if (attempt !== connectionAttempt.current) return;
             setEntering(false);
@@ -599,20 +356,19 @@ export function MatgoApp() {
           if (!active) return;
           historyRef.current = next;
           setPlayHistory(next);
-          if (modeRef.current === 'single') setStats(soloStats(next));
         })
         .catch(() => {
           if (active) setError('기록 저장소를 열지 못했어요. 브라우저 저장 공간을 확인해주세요.');
         });
     refreshHistory();
     setPrefs(readPreferences());
-    setFriendName(getItem('toki.nickname.v1') ?? '');
+    setFriendName(getItem('toki-gostop.nickname.v1') ?? '');
     const params = new URLSearchParams(window.location.search);
     const code = params.get('room')?.toUpperCase();
     setDebug(process.env.NODE_ENV === 'development' && params.get('debug') === '1');
     let prior: SavedRoom | null = null;
     try {
-      prior = JSON.parse(getItem('toki.firebase.room.v1') ?? 'null');
+      prior = JSON.parse(getItem('toki-gostop.firebase.room.v1') ?? 'null');
     } catch {}
     if (
       prior &&
@@ -669,17 +425,23 @@ export function MatgoApp() {
     roundRef.current = nextRound;
     setRound(nextRound);
     soloRoundId.current = crypto.randomUUID();
-    if (!previous) setStats(soloStats(historyRef.current));
-    const game = createGame(
+    if (!previous) {
+      soloStatsRef.current = structuredClone(emptyStats);
+      setStats(structuredClone(emptyStats));
+      appliedSolo.current.clear();
+    }
+    const game = createSolo(
       debug
         ? {
             seed: Number(seed) + (previous ? nextRound : 0),
             dealer: previous?.result?.winner ?? previous?.dealer,
-            nagariMultiplier: previous?.result?.winner === null ? 2 : 1,
+            gameId: soloRoundId.current,
+            nagariStreak: previous?.result?.winner === null ? previous.nagariStreak + 1 : 0,
           }
         : {
             dealer: previous?.result?.winner ?? previous?.dealer,
-            nagariMultiplier: previous?.result?.winner === null ? 2 : 1,
+            gameId: soloRoundId.current,
+            nagariStreak: previous?.result?.winner === null ? previous.nagariStreak + 1 : 0,
             rng: () => crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296,
           },
     );
@@ -724,7 +486,9 @@ export function MatgoApp() {
       setRound(1);
       roundRef.current = 1;
       soloRoundId.current = crypto.randomUUID();
-      setStats(soloStats(historyRef.current));
+      setStats(structuredClone(emptyStats));
+      soloStatsRef.current = structuredClone(emptyStats);
+      game.gameId = soloRoundId.current;
       setLog([]);
       publish(projectState(game, 0));
       setScreen('game');
@@ -735,16 +499,15 @@ export function MatgoApp() {
     }
   };
   const recordResult = useCallback(
-    (game: GameState) => {
-      if (game.result)
-        saveResult({
-          id: soloRoundId.current,
-          mode: 'single',
-          opponent: '토끼',
-          me: 0,
-          result: game.result,
-        });
-    },
+    (game: GameState) =>
+      saveResult({
+        gameId: game.gameId,
+        mode: 'single',
+        names: ['나', '토끼 하나', '토끼 둘'],
+        me: 0,
+        transactions: game.transactions,
+        result: game.result,
+      }),
     [saveResult],
   );
   const dispatch = useCallback(
@@ -782,56 +545,34 @@ export function MatgoApp() {
       }
       try {
         if (!logical.current) return;
-        const r = applyAction(logical.current, action);
+        const r = applyLocal(action);
         logical.current = r.nextState;
         present(projectState(r.nextState, 0), r.events);
-        if (r.nextState.result) recordResult(r.nextState);
+        recordResult(r.nextState);
       } catch (e) {
         setError(e instanceof Error ? e.message : '패를 다시 선택해주세요.');
       }
     },
     [present, recordResult],
   );
-  useEffect(() => {
-    if (
+  useCpuTurn({
+    view,
+    logical,
+    dispatch,
+    difficulty: prefs.difficulty,
+    fast: skip && debug,
+    paused:
       mode !== 'single' ||
       screen !== 'game' ||
       busy ||
       dealerNotice ||
       kukjinMenu ||
       debugPanel ||
-      !view ||
-      view.currentPlayer !== 1 ||
-      view.phase === 'FINISHED' ||
       settings ||
-      zoom ||
+      !!zoom ||
       rules ||
-      exit
-    )
-      return;
-    const delay = skip && debug ? 0 : 700 + Math.random() * 700;
-    const timer = setTimeout(() => {
-      if (logical.current)
-        dispatch(chooseAction(projectState(logical.current, 1), 1, prefs.difficulty));
-    }, delay);
-    return () => clearTimeout(timer);
-  }, [
-    mode,
-    screen,
-    dealerNotice,
-    kukjinMenu,
-    debugPanel,
-    busy,
-    view,
-    prefs.difficulty,
-    dispatch,
-    skip,
-    debug,
-    settings,
-    zoom,
-    rules,
-    exit,
-  ]);
+      exit,
+  });
   const leave = () => {
     floorLayout.current = new Map();
     setDealerNotice(false);
@@ -851,7 +592,7 @@ export function MatgoApp() {
     const previousTransport = multiplayer.current;
     multiplayer.current = null;
     if (previousTransport) void previousTransport.leave().catch(() => previousTransport.dispose());
-    storeItem('toki.firebase.room.v1', null);
+    storeItem('toki-gostop.firebase.room.v1', null);
     saved.current = null;
     setScreen('home');
     setRoom(null);
@@ -892,7 +633,11 @@ export function MatgoApp() {
     view.currentPlayer === me &&
     (mode === 'single' || (connected && !!room?.canAct));
   const ownName = mode === 'single' ? '나' : (room?.names[me] ?? (friendName.trim() || '나'));
-  const opponent = mode === 'single' ? '토끼' : (room?.names[1 - me] ?? '친구');
+  const names =
+    mode === 'single'
+      ? (['나', '토끼 하나', '토끼 둘'] as [string, string, string])
+      : (room?.names ?? (['나', '친구 하나', '친구 둘'] as [string, string, string]));
+  const opponent = names[view?.currentPlayer ?? otherSeats(me)[0]];
   const zoomCards = (cards: HwatuCard[], title: string, captured = false) =>
     setZoom({ cards, title, captured });
   const tapCard = (c: HwatuCard) => {
@@ -924,7 +669,10 @@ export function MatgoApp() {
     }
   };
   const interrupted =
-    mode === 'multi' && !!room && !room.closed && (!connected || !room.connected[1 - me]);
+    mode === 'multi' &&
+    !!room &&
+    !room.closed &&
+    (!connected || otherSeats(me).some((id) => !room.connected[id]));
   useEffect(() => {
     if (!interrupted) {
       setDisconnectedSince(null);
@@ -942,7 +690,7 @@ export function MatgoApp() {
   const snapshotStatus =
     !connected && mode === 'multi'
       ? '연결을 복구하고 있어요'
-      : mode === 'multi' && room && !room.connected[1 - me]
+      : mode === 'multi' && room && otherSeats(me).some((id) => !room.connected[id])
         ? me === 1
           ? '방장의 연결을 기다리고 있어요.'
           : '친구의 연결을 기다리고 있어요.'
@@ -963,6 +711,34 @@ export function MatgoApp() {
                 : view?.currentPlayer === me
                   ? '내 차례 · 손패를 톡 눌러주세요'
                   : `${withParticle(opponent, '이/가')} 패를 고르고 있어요`;
+  useEffect(() => {
+    if (!debug || process.env.NODE_ENV !== 'development') return;
+    const api = {
+      getState: () => logical.current,
+      getView: () => viewRef.current,
+      act: dispatch,
+      saveProgress: persistGameProgress,
+      load: (game: GameState) => {
+        assertInvariant(game);
+        generation.current++;
+        queue.current = Promise.resolve();
+        busyRef.current = false;
+        setBusy(false);
+        setMotion(null);
+        setSpecialEffect(null);
+        setHighlight([]);
+        setDealerNotice(false);
+        logical.current = game;
+        publish(projectState(game, 0));
+      },
+      fixture: startDebugFixture,
+      skip: () => setSkip(true),
+    };
+    Object.assign(window, { __gostopDebug: api });
+    return () => {
+      delete (window as Window & { __gostopDebug?: unknown }).__gostopDebug;
+    };
+  });
   return (
     <main className={`app ${screen === 'game' ? 'playing' : ''}`}>
       {showHistory && (
@@ -970,11 +746,10 @@ export function MatgoApp() {
           history={playHistory}
           onClose={() => setShowHistory(false)}
           onReset={() => {
-            void updateHistory(resetSolo)
+            void resetSoloHistory()
               .then((next) => {
                 historyRef.current = next;
                 setPlayHistory(next);
-                if (modeRef.current === 'single') setStats(soloStats(next));
               })
               .catch(() => setError('기록을 초기화하지 못했어요. 다시 시도해주세요.'));
           }}
@@ -986,13 +761,13 @@ export function MatgoApp() {
             <a
               className="brand"
               href="/"
-              aria-label="토끼맞고 홈"
+              aria-label="토끼고스톱 홈"
               onClick={(event) => {
                 event.preventDefault();
                 leave();
               }}
             >
-              토끼<span>맞고</span>
+              토끼<span>고스톱</span>
               <RabbitMark />
             </a>
             <button className="icon-button" aria-label="설정" onClick={() => setSettings(true)}>
@@ -1001,7 +776,7 @@ export function MatgoApp() {
           </header>
           <div className="home-copy">
             <span className="eyebrow">
-              <span className="small-flower" /> 둘이서, 느긋하게
+              <span className="small-flower" /> 셋이서, 느긋하게
             </span>
             <h1>
               패는 없어도,
@@ -1009,7 +784,7 @@ export function MatgoApp() {
               마주 앉은 것처럼.
             </h1>
             <p>
-              스마트폰 두 대면 충분해요.
+              스마트폰 세 대면 충분해요.
               <br />
               소중한 사람과 나누는 작은 한 판.
             </p>
@@ -1028,7 +803,7 @@ export function MatgoApp() {
           <div className="home-actions">
             <button className="primary" onClick={() => startSingle()}>
               <span>
-                혼자 치기<small>토끼와 편안한 연습 한 판</small>
+                혼자 치기<small>토끼 둘과 편안한 연습 한 판</small>
               </span>
               <span aria-hidden>↗</span>
             </button>
@@ -1040,7 +815,7 @@ export function MatgoApp() {
               }}
             >
               <span>
-                친구와 치기<small>방 코드로 함께하는 맞고</small>
+                친구와 치기<small>방 코드로 함께하는 고스톱</small>
               </span>
               <span aria-hidden>↗</span>
             </button>
@@ -1064,7 +839,7 @@ export function MatgoApp() {
               ←
             </button>
             <span className="brand">
-              토끼<span>맞고</span>
+              토끼<span>고스톱</span>
               <RabbitMark />
             </span>
             <button className="icon-button" aria-label="설정" onClick={() => setSettings(true)}>
@@ -1078,7 +853,7 @@ export function MatgoApp() {
               value={friendName}
               onChange={(e) => {
                 setFriendName(e.target.value);
-                storeItem('toki.nickname.v1', e.target.value);
+                storeItem('toki-gostop.nickname.v1', e.target.value);
               }}
               maxLength={12}
               placeholder="내 이름을 넣어주세요"
@@ -1118,42 +893,12 @@ export function MatgoApp() {
         </section>
       )}
       {screen === 'lobby' && (
-        <section className="connection-screen lobby">
-          <header>
-            <button className="icon-button" aria-label="나가기" onClick={leave}>
-              ←
-            </button>
-            <span className="brand">
-              토끼<span>맞고</span>
-              <RabbitMark />
-            </span>
-          </header>
-          <span className="eyebrow">화투판을 펼쳤어요</span>
-          <h1>{room ? '친구를 기다려요.' : '화투판에 연결 중…'}</h1>
-          <p className="muted">링크를 보내거나, 아래 코드를 알려주세요.</p>
+        <RoomLobby room={room} connected={connected} onLeave={leave}>
           {room && <InviteContent code={room.code} url={inviteUrl} qr={qr} onError={setError} />}
-          <p className="fine-print">
-            방은 생성 후 24시간 유지됩니다. 나가기를 선택하면 두 사람의 방이 종료돼요.
-          </p>
-          <p className="waiting-note">
-            <span className="status-dot" />
-            {connected ? '친구가 들어오면 함께 시작해요.' : '연결을 복구하고 있어요.'}
-          </p>
-        </section>
+        </RoomLobby>
       )}
       {screen === 'game' && view && (
-        <section
-          className="game-table"
-          data-testid="game-table"
-          aria-label="맞고 게임판"
-          data-phase={view.phase}
-          data-current={view.currentPlayer}
-          data-me={me}
-          data-version={view.stateVersion}
-          data-round={round}
-          data-busy={busy}
-          data-can-act={canPlay}
-        >
+        <GameTable view={view} me={me} round={round} busy={busy} canPlay={canPlay}>
           <header className="game-header">
             <button className="icon-button" aria-label="나가기" onClick={() => setExit(true)}>
               ←
@@ -1170,7 +915,7 @@ export function MatgoApp() {
             ) : (
               <>
                 <span className="table-logo">
-                  토끼<span>맞고</span>
+                  토끼<span>고스톱</span>
                   <RabbitMark />
                 </span>
                 <span className="round">{round}번째 판</span>
@@ -1189,23 +934,29 @@ export function MatgoApp() {
               </>
             )}
           </header>
-          <PlayerInfo
-            name={opponent}
-            score={view.scores[1 - me].baseScore}
-            go={view.players[1 - me].goCount}
-            active={view.phase !== 'FINISHED' && view.currentPlayer !== me}
-            turnLabel="상대 차례"
-            dealer={view.dealer !== me}
-            wins={stats.wins[1 - me]}
-            handCount={view.players[1 - me].handCount}
-            passes={view.players[1 - me].bombPasses}
-          />
-          <Captured
-            player={view.players[1 - me]}
-            score={view.scores[1 - me]}
-            onZoom={zoomCards}
-            hiddenIds={motion?.kind === 'transfer' ? motion.cards.map((c) => c.id) : []}
-          />
+          <div className="opponents">
+            {otherSeats(me).map((id) => (
+              <div className="opponent-panel" key={id} data-player-seat={id}>
+                <PlayerPanel
+                  name={names[id]}
+                  score={view.scores[id].baseScore}
+                  go={view.players[id].goCount}
+                  active={view.phase !== 'FINISHED' && view.currentPlayer === id}
+                  turnLabel="차례"
+                  dealer={view.dealer === id}
+                  wins={stats.wins[id]}
+                  handCount={view.players[id].handCount}
+                  passes={view.players[id].bombPasses}
+                />
+                <Captured
+                  player={view.players[id]}
+                  score={view.scores[id]}
+                  onZoom={zoomCards}
+                  hiddenIds={motion?.kind === 'transfer' ? motion.cards.map((c) => c.id) : []}
+                />
+              </div>
+            ))}
+          </div>
           <div className="floor-area" data-testid="floor-area">
             <div className="deck" aria-label={`뒤집힌 덱 ${view.deckCount}장`}>
               <Card back />
@@ -1378,21 +1129,23 @@ export function MatgoApp() {
               </div>
             )}
           </div>
-          <PlayerInfo
-            name={ownName}
-            score={view.scores[me].baseScore}
-            go={view.players[me].goCount}
-            active={view.phase !== 'FINISHED' && view.currentPlayer === me}
-            turnLabel="내 차례"
-            dealer={view.dealer === me}
-            wins={stats.wins[me]}
-          />
-          <Captured
-            player={view.players[me]}
-            score={view.scores[me]}
-            onZoom={zoomCards}
-            hiddenIds={motion?.kind === 'transfer' ? motion.cards.map((c) => c.id) : []}
-          />
+          <div className="own-panel" data-player-seat={me}>
+            <PlayerPanel
+              name={ownName}
+              score={view.scores[me].baseScore}
+              go={view.players[me].goCount}
+              active={view.phase !== 'FINISHED' && view.currentPlayer === me}
+              turnLabel="내 차례"
+              dealer={view.dealer === me}
+              wins={stats.wins[me]}
+            />
+            <Captured
+              player={view.players[me]}
+              score={view.scores[me]}
+              onZoom={zoomCards}
+              hiddenIds={motion?.kind === 'transfer' ? motion.cards.map((c) => c.id) : []}
+            />
+          </div>
           <div className="hand-area" data-testid="hand-area">
             <div className="hand-grid">
               {[...view.hand]
@@ -1460,7 +1213,7 @@ export function MatgoApp() {
             ) : null}
             {debug && <button onClick={() => setDebugPanel(true)}>개발</button>}
           </div>
-        </section>
+        </GameTable>
       )}
       {view &&
         canPlay &&
@@ -1525,7 +1278,7 @@ export function MatgoApp() {
         />
       )}
       {rules && (
-        <Modal title="맞고, 천천히 익혀요" onClose={() => setRules(false)}>
+        <Modal title="고스톱, 천천히 익혀요" onClose={() => setRules(false)}>
           <p>
             같은 월의 화투를 만나면 두 패를 가져와요. 손패를 한 장 내고, 가운데 더미에서 한 장
             뒤집습니다.
@@ -1536,7 +1289,7 @@ export function MatgoApp() {
             <span>같은 1월 → 함께 먹어요</span>
           </div>
           <p>
-            광, 열끗, 띠, 피를 모아 <strong>7점</strong>이 되면 고 또는 스톱을 골라요. 스톱은 이번
+            광, 열끗, 띠, 피를 모아 <strong>3점</strong>이 되면 고 또는 스톱을 골라요. 스톱은 이번
             판 승리, 고는 더 큰 점수를 위한 한 번 더.
           </p>
           <dl className="breakdown">
@@ -1558,8 +1311,21 @@ export function MatgoApp() {
             </div>
           </dl>
           <p className="fine-print">
-            기본 화투 48장에 보너스 쌍피 두 장을 더해요. 미션과 게임머니는 없어요. 손패는 톡 눌러
-            내고, 길게 눌러 크게 볼 수 있어요.
+            기본 화투 48장에 보너스 쌍피 두 장을 더해요. 손패는 각 7장, 바닥은 6장으로 시작해요.
+            미션과 게임머니는 없어요. 손패는 톡 눌러 내고, 길게 눌러 크게 볼 수 있어요.
+          </p>
+          <p className="fine-print">
+            피박은 1~5피이고 0피는 면제예요. 광박과 열끗 7장 멍따는 각각 2배예요. 가장 최근 고를
+            부른 사람이 아닌 다른 사람이 스톱하면 고 선언자가 두 사람의 부담을 내요.
+          </p>
+          <p className="fine-print">
+            총통은 상대마다 5점, 누적 3뻑은 3점이에요. 첫뻑·첫따닥은 각각 3점이며 연속 첫뻑은
+            6점·9점이 추가돼요. 나가리는 다음 판 2배·4배·8배로 쌓여요.
+          </p>
+          <p className="fine-print">
+            쪽·따닥·쓸·폭탄·남의 뻑은 두 상대에게 각각 1피, 자뻑은 2피를 가져와요. 홑피부터 내며
+            쌍피만 있으면 쌍피를 내요. 마지막 턴에는 뻑이 쌓이지 않고 쪽·따닥·쓸로 피를 가져오지
+            않아요.
           </p>
           <button className="primary" onClick={() => setRules(false)}>
             알겠어요
@@ -1609,14 +1375,20 @@ export function MatgoApp() {
             <RabbitMark />
           </div>
           <p>
-            <strong>{view.dealer === 0 ? '내가 선이에요' : '토끼가 선이에요'}</strong>
+            <strong>
+              {view.dealer === 0
+                ? '내가 선이에요'
+                : `${withParticle(names[view.dealer], '이/가')} 선이에요`}
+            </strong>
           </p>
           <p className="opening-bonus-note">
             {view.players[view.dealer].captured.filter((c) => c.isBonus).length > 0 &&
-              `시작 보너스 ${view.players[view.dealer].captured.filter((c) => c.isBonus).length}장은 선이 가져갔어요. 바닥은 8장으로 보충했어요.`}
+              `시작 보너스 ${view.players[view.dealer].captured.filter((c) => c.isBonus).length}장은 선이 가져갔어요. 바닥은 6장으로 보충했어요.`}
           </p>
           <p>
-            {view.dealer === 0 ? '내 패부터 천천히 골라주세요.' : '준비되면 토끼가 먼저 패를 내요.'}
+            {view.dealer === 0
+              ? '내 패부터 천천히 골라주세요.'
+              : `준비되면 ${withParticle(names[view.dealer], '이/가')} 먼저 패를 내요.`}
           </p>
           <button className="primary" onClick={() => setDealerNotice(false)}>
             게임 시작
@@ -1680,90 +1452,15 @@ export function MatgoApp() {
         </Modal>
       )}
       {view?.result && !busy && !zoom && !settings && screen === 'game' && (
-        <Modal
-          title={
-            view.result.winner === null
-              ? '다음 판을 기약해요'
-              : view.result.winner === me
-                ? '기분 좋은 한 판!'
-                : `${withParticle(opponent, '의')} 멋진 한 판`
-          }
-          onClose={() => {}}
-          className="result-modal"
-        >
-          <span className="eyebrow">
-            {round}번째 판 ·{' '}
-            {view.result.reason === 'NAGARI'
-              ? '나가리 · 다음 판 2배'
-              : view.result.reason === 'CHONGTONG'
-                ? '총통'
-                : view.result.reason === 'THREE_PPUK'
-                  ? '3뻑'
-                  : view.result.reason === 'HEODANG'
-                    ? '허당'
-                    : '스톱'}
-          </span>
-          <div className="decision-score">
-            {view.result.points}
-            <span>점</span>
-          </div>
-          {view.result.winner !== null && (
-            <p className="fine-print">
-              {view.players[view.result.winner].goCount}고 · 흔들기{' '}
-              {view.players[view.result.winner].shakes.length}회 · 폭탄{' '}
-              {view.players[view.result.winner].bombs}회
-            </p>
-          )}
-          {view.result.score && (
-            <ScoreBreakdown score={view.result.score} fixed={view.result.reason !== 'STOP'} />
-          )}
-          <p className="fine-print">
-            즉시 점수 · 나 {view.result.sidePoints[me]} / {opponent}{' '}
-            {view.result.sidePoints[1 - me]}
-          </p>
-          <section
-            className="match-summary"
-            aria-label={mode === 'single' ? '혼자 치기 누적' : '이번 모임'}
-          >
-            <h3>{mode === 'single' ? '혼자 치기 누적' : '이번 모임'}</h3>
-            <div className="match-scores">
-              <div className="match-player">
-                <span title={ownName}>{ownName}</span>
-                <strong>
-                  {stats.points[me].toLocaleString()}
-                  <small>점</small>
-                </strong>
-                <span>{stats.wins[me]}승</span>
-              </div>
-              <span className="match-versus" aria-hidden="true">
-                :
-              </span>
-              <div className="match-player">
-                <span title={opponent}>{opponent}</span>
-                <strong>
-                  {stats.points[1 - me].toLocaleString()}
-                  <small>점</small>
-                </strong>
-                <span>{stats.wins[1 - me]}승</span>
-              </div>
-            </div>
-            <p>
-              {stats.points[me] === stats.points[1 - me]
-                ? '현재 동점이에요'
-                : `${Math.abs(stats.points[me] - stats.points[1 - me]).toLocaleString()}점 ${stats.points[me] > stats.points[1 - me] ? '앞서고' : '뒤지고'} 있어요`}
-            </p>
-          </section>
-          <button
-            className="primary"
-            disabled={mode === 'multi' && !!room?.nextReady[me]}
-            onClick={nextRound}
-          >
-            {mode === 'multi' && room?.nextReady[me] ? '친구의 준비를 기다려요' : '한 판 더'}
-          </button>
-          <button className="text-button" onClick={leave}>
-            대기실로
-          </button>
-        </Modal>
+        <RoundResult
+          view={view}
+          me={me}
+          names={names}
+          stats={stats}
+          waiting={mode === 'multi' && !!room?.nextReady[me]}
+          onNext={nextRound}
+          onLeave={leave}
+        />
       )}
       {invite && room && (
         <Modal title="우리 화투판 초대" onClose={() => setInvite(false)}>
@@ -1777,7 +1474,7 @@ export function MatgoApp() {
           }
           onClose={leave}
         >
-          <p>두 사람의 게임은 종료됐어요. 끝나지 않은 판은 승패에 반영하지 않아요.</p>
+          <p>세 사람의 게임은 종료됐어요. 끝나지 않은 판은 승패에 반영하지 않아요.</p>
           <button className="primary" onClick={leave}>
             홈으로 돌아가기
           </button>
@@ -1845,7 +1542,7 @@ export function MatgoApp() {
           <details>
             <summary>직접 패 분배</summary>
             <p className="fine-print">
-              JSON: hand(내 패 ID 10장), floor(8장), draw(뒤집을 순서). 나머지는 seed로 섞습니다.
+              JSON: hand(내 패 ID 7장), floor(6장), draw(뒤집을 순서). 나머지는 seed로 섞습니다.
             </p>
             <textarea
               aria-label="직접 패 분배 JSON"
@@ -1863,11 +1560,19 @@ export function MatgoApp() {
           </p>
           <details>
             <summary>현재 GameState / deck 순서</summary>
-            <pre>{JSON.stringify(logical.current, null, 2)}</pre>
+            <pre>
+              {JSON.stringify(
+                logical.current,
+                (_, v) => (typeof v === 'bigint' ? v.toString() : v),
+                2,
+              )}
+            </pre>
           </details>
           <details>
             <summary>event log ({log.length})</summary>
-            <pre>{JSON.stringify(log, null, 2)}</pre>
+            <pre>
+              {JSON.stringify(log, (_, v) => (typeof v === 'bigint' ? v.toString() : v), 2)}
+            </pre>
           </details>
         </Modal>
       )}
@@ -1891,50 +1596,6 @@ function SettingsIcon() {
     </svg>
   );
 }
-function PlayerInfo({
-  name,
-  score,
-  go,
-  active,
-  turnLabel,
-  dealer,
-  wins,
-  handCount,
-  passes,
-}: {
-  name: string;
-  score: number;
-  go: number;
-  active: boolean;
-  turnLabel: string;
-  dealer: boolean;
-  wins: number;
-  handCount?: number;
-  passes?: number;
-}) {
-  return (
-    <div className={`player-info ${active ? 'active' : ''}`}>
-      <span className="player-name">
-        {active && <small className="turn-badge">{turnLabel}</small>}
-        <span className="player-name-text" title={name}>
-          {name}
-        </span>
-        {handCount !== undefined && (
-          <small className="hand-count" data-testid="opponent-hand">
-            {handCount}장{passes ? ` · 뒤집기 ${passes}회` : ''}
-          </small>
-        )}
-        {dealer && <small className="dealer-badge">선</small>}
-        <small className="win-count">{wins}승</small>
-      </span>
-      <span className="player-score">
-        {go > 0 && <small>{go}고</small>}
-        <strong>{score}</strong>
-        <span>점</span>
-      </span>
-    </div>
-  );
-}
 function InviteContent({
   code,
   url,
@@ -1950,7 +1611,7 @@ function InviteContent({
     try {
       if (navigator.share)
         await navigator.share({
-          title: '토끼맞고 · 같이 한 판',
+          title: '토끼고스톱 · 같이 한 판',
           text: `우리 화투판에 들어와요. 방 코드 ${code}`,
           url,
         });
@@ -1987,57 +1648,5 @@ function InviteContent({
       </button>
       <input aria-label="초대 링크" readOnly value={url} onFocus={(e) => e.target.select()} />
     </div>
-  );
-}
-function ScoreBreakdown({
-  score: s,
-  fixed,
-}: {
-  score: NonNullable<GameState['result']>['score'] & {};
-  fixed: boolean;
-}) {
-  const multipliers = [
-    ['고 배수', s.goMultiplier],
-    ['흔들기 / 폭탄', s.shakeMultiplier],
-    ['피박', s.pibakMultiplier],
-    ['광박', s.gwangbakMultiplier],
-    ['멍따', s.meongttaMultiplier],
-    ['고박', s.gobakMultiplier],
-    ['전판 나가리', s.nagariMultiplier],
-  ] as const;
-  return (
-    <dl className="breakdown">
-      <div>
-        <dt>광 · 열끗 · 띠 · 피</dt>
-        <dd>
-          {s.gwangScore} · {s.yeolScore + s.godoriScore} ·{' '}
-          {s.ribbonScore + s.hongdanScore + s.cheongdanScore + s.chodanScore} · {s.piScore}
-        </dd>
-      </div>
-      <div>
-        <dt>기본 점수</dt>
-        <dd>{s.baseScore}점</dd>
-      </div>
-      {!fixed && s.goBonus > 0 && (
-        <div>
-          <dt>고 추가점</dt>
-          <dd>+{s.goBonus}</dd>
-        </div>
-      )}
-      {multipliers
-        .filter(([label, n]) => n > 1 && (!fixed || label === '전판 나가리'))
-        .map(([label, n]) => (
-          <div key={label}>
-            <dt>{label}</dt>
-            <dd>×{n}</dd>
-          </div>
-        ))}
-      {fixed && (
-        <div>
-          <dt>특수 승리</dt>
-          <dd>족보 대신 고정 점수</dd>
-        </div>
-      )}
-    </dl>
   );
 }

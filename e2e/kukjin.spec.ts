@@ -16,8 +16,8 @@ test('mobile chrysanthemum choice shows scoring alternatives and mandatory choic
   await page.getByRole('button', { name: '국화 점수 선택', exact: true }).click();
   await page.locator('[data-card-id="m2-0"]').click();
   await expect(modal).toBeVisible();
-  await expect(modal).toContainText('기본 8점');
-  await expect(modal).toContainText('기본 6점');
+  await expect(modal).toContainText('기본 3점');
+  await expect(modal).toContainText('기본 1점');
   await page.goBack();
   await expect(modal).toBeVisible();
   await page.screenshot({ path: '/tmp/toki-kukjin-dialog.png' });
@@ -25,8 +25,7 @@ test('mobile chrysanthemum choice shows scoring alternatives and mandatory choic
   await expect(page.getByTestId('game-table')).toHaveAttribute('data-phase', 'GO_STOP');
   await expect(
     page
-      .locator('.captured')
-      .nth(1)
+      .locator('.own-panel .captured')
       .locator('.captured-group')
       .nth(3)
       .locator('[data-captured-card-id="m9-0"]'),

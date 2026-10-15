@@ -5,8 +5,8 @@ test('mobile single play never uses the saved friend name and friend form stays 
   page,
 }) => {
   await page.addInitScript(() => {
-    if (!localStorage.getItem('toki.nickname.v1'))
-      localStorage.setItem('toki.nickname.v1', '배포완료B');
+    if (!localStorage.getItem('toki-gostop.nickname.v1'))
+      localStorage.setItem('toki-gostop.nickname.v1', '배포완료B');
   });
   await page.setViewportSize({ width: 378, height: 672 });
   await page.goto('/?debug=1');
@@ -40,5 +40,5 @@ test('mobile single play never uses the saved friend name and friend form stays 
   // Leaving clears the debug query; verify the real single-player name after reload.
   await page.getByRole('button', { name: /혼자 치기/ }).click();
   await expect(page.locator('.player-info').last().locator('.player-name-text')).toHaveText('나');
-  expect(await page.evaluate(() => localStorage.getItem('toki.nickname.v1'))).toBe('민수');
+  expect(await page.evaluate(() => localStorage.getItem('toki-gostop.nickname.v1'))).toBe('민수');
 });

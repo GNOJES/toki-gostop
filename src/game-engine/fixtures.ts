@@ -62,7 +62,7 @@ export function createFixture(name: FixtureName, seed = 12345): GameState {
       opponent: [],
     },
     '국화 점수 선택': {
-      hand: ['m2-0'],
+      hand: ['m2-0', 'bonus-0', 'm1-1'],
       floor: ['m1-0', 'm4-0', 'm5-0', 'm6-0', 'm7-0', 'm8-0'],
       draw: ['m3-0'],
       opponent: [],

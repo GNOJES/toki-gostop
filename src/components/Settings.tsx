@@ -72,7 +72,7 @@ export function Settings({
       </label>
       <p className="fine-print">진동은 지원되는 기기에서 작동해요.</p>
       <button className="secondary" onClick={onRules}>
-        맞고 안내
+        고스톱 안내
       </button>
       <p className="fine-print">
         화투 그림:{' '}

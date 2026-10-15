@@ -67,7 +67,7 @@ async function update(change: Change, publish = true): Promise<PlayHistory> {
         for (const id of seen) memorySeen.add(id);
         for (const id of done) memoryDone.add(id);
         try {
-          if(publish) localStorage.setItem(HISTORY_KEY, `${Date.now()}:${Math.random()}`);
+          if (publish) localStorage.setItem(HISTORY_KEY, `${Date.now()}:${Math.random()}`);
         } catch {}
         resolve(next);
       };

@@ -63,7 +63,7 @@ test('mobile go stop decision preserves visible board and allows card inspection
     await page.goBack();
     await expect(page.locator('dialog.zoom-modal[open]')).toHaveCount(0);
     await expect(page.getByTestId('game-table')).toHaveAttribute('data-phase', 'GO_STOP');
-    for (const captured of [0, 1]) {
+    for (const captured of [0, 1, 2]) {
       await page.locator('.captured').nth(captured).locator('.captured-group').last().click();
       await expect(page.locator('dialog.zoom-modal[open]')).toBeVisible();
       await page.goBack();

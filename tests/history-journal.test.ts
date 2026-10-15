@@ -25,3 +25,35 @@ it('uses an idempotent in-memory fallback when browser storage is unavailable', 
   await persistGameProgress(input);
   expect((await readHistory()).solo.points).toBe('0');
 });
+it('retains readable immediate point details for an interrupted friend round across reads', async () => {
+  const input = {
+    gameId: 'aborted-friend',
+    mode: 'multi' as const,
+    names: ['A', 'B', 'C'] as [string, string, string],
+    me: 2 as const,
+    transactions: [
+      {
+        id: 'aborted-friend:instant',
+        from: 0 as const,
+        to: 2 as const,
+        amount: 3n,
+        kind: 'INSTANT' as const,
+        reason: 'OPENING_PPUK' as const,
+      },
+    ],
+    result: null,
+  };
+  await persistGameProgress(input);
+  await persistGameProgress(input);
+  const h = await readHistory();
+  expect(h.recent).toHaveLength(0);
+  expect((h as any).instant).toEqual([
+    expect.objectContaining({
+      gameId: 'aborted-friend',
+      mode: 'multi',
+      names: ['A', 'B', 'C'],
+      me: 2,
+      transfer: expect.objectContaining({ amount: '3', from: 0, to: 2 }),
+    }),
+  ]);
+});
