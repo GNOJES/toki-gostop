@@ -96,7 +96,7 @@ export class FirebaseTransport implements MultiplayerTransport {
       }
       let owned: string[] = [];
       try {
-        const stored: unknown = JSON.parse(localStorage.getItem('toki.firebase.owned.v1') ?? '[]');
+        const stored: unknown = JSON.parse(localStorage.getItem('toki-gostop.firebase.owned.v1') ?? '[]');
         if (Array.isArray(stored))
           owned = stored.filter((code): code is string => typeof code === 'string');
       } catch {}
@@ -159,7 +159,7 @@ export class FirebaseTransport implements MultiplayerTransport {
       if (!code) throw Error('방을 만들지 못했어요. 다시 시도해주세요.');
       try {
         localStorage.setItem(
-          'toki.firebase.owned.v1',
+          'toki-gostop.firebase.owned.v1',
           JSON.stringify([...owned.filter((c) => c !== code && !removed.has(c)), code]),
         );
       } catch {}

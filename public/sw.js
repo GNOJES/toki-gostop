@@ -1,10 +1,10 @@
-const CACHE = 'toki-v10-assets-9e079ca12aa0';
+const CACHE = 'toki-gostop-v1-assets-9e079ca12aa0';
 const BUILD = 'e65c8b31b2be2572';
 const CURRENT = `${CACHE}-${BUILD}`;
 const STATIC = ['/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png'];
 const clientCaches = new Map();
 let manifest;
-const owned = (name) => name.startsWith('toki-');
+const owned = (name) => name.startsWith('toki-gostop-');
 async function cardManifest() {
   if (!manifest)
     manifest = await (await (await caches.open(CURRENT)).match('/card-assets.json')).json();

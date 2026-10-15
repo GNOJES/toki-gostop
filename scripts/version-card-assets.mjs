@@ -12,7 +12,7 @@ for (const file of readdirSync('public/cards').sort()) {
 const version = createHash('sha256').update(JSON.stringify(cards)).digest('hex').slice(0, 12);
 writeFileSync('public/card-assets.json', JSON.stringify({ version, cards }, null, 2) + '\n');
 const worker = readFileSync('public/sw.js', 'utf8')
-  .replace(/^const CACHE = .*;$/m, `const CACHE = 'toki-v10-assets-${version}';`)
+  .replace(/^const CACHE = .*;$/m, `const CACHE = 'toki-gostop-v1-assets-${version}';`)
   .replace(/^const BUILD = .*;$/m, `const BUILD = '${randomUUID()}';`);
 writeFileSync('public/sw.js', worker);
 console.log(`Card asset version: ${version}`);

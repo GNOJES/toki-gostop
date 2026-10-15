@@ -23,6 +23,8 @@ async function initialize() {
   };
   if (!config.apiKey || !config.databaseURL || !config.projectId || !config.appId)
     throw Error('친구와 치기 연결이 아직 준비되지 않았어요. 잠시 후 다시 이용해주세요.');
+  if (config.projectId === 'toki-matgo' || config.projectId === 'demo-toki-matgo')
+    throw Error('토끼맞고 연결 설정은 사용할 수 없어요. 고스톱 전용 설정이 필요해요.');
   const existing = getApps().length > 0;
   const app = existing ? getApp() : initializeApp(config);
   const auth = getAuth(app),

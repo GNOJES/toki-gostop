@@ -14,6 +14,29 @@ export function validateFirebaseEnv(env) {
     if (!env[`NEXT_PUBLIC_FIREBASE_${field}`]?.trim())
       throw Error(`Missing NEXT_PUBLIC_FIREBASE_${field}`);
   const id = env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+  if (id === 'toki-matgo' || id === 'demo-toki-matgo')
+    throw Error('Original matgo project is forbidden');
+  if (!env.FIREBASE_EXPECTED_PROJECT_ID || env.FIREBASE_EXPECTED_PROJECT_ID !== id)
+    throw Error('FIREBASE_EXPECTED_PROJECT_ID does not match PROJECT_ID');
+  const ci = env.CI === 'true' && env.APP_BUILD_CONTEXT === 'ci' && !env.VERCEL_ENV;
+  if (id.startsWith('demo-') && !ci) throw Error('demo project requires explicit local CI context');
+  let origin;
+  try {
+    origin = new URL(env.NEXT_PUBLIC_APP_ORIGIN);
+  } catch {
+    throw Error('Invalid APP_ORIGIN');
+  }
+  if (
+    origin.protocol !== 'https:' ||
+    origin.origin !== env.NEXT_PUBLIC_APP_ORIGIN ||
+    origin.hostname === 'toki-matgo.vercel.app'
+  )
+    throw Error('Invalid APP_ORIGIN');
+  if (
+    !/^G-[A-Z0-9]+$/.test(env.NEXT_PUBLIC_GA_MEASUREMENT_ID ?? '') ||
+    env.NEXT_PUBLIC_GA_MEASUREMENT_ID === 'G-4TM1JD07N3'
+  )
+    throw Error('Missing or original GA measurement ID');
   if (env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS === 'true')
     throw Error('Production must not enable NEXT_PUBLIC_FIREBASE_USE_EMULATORS');
   if (env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN !== `${id}.firebaseapp.com`)

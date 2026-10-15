@@ -1,4 +1,4 @@
-export const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID || 'G-4TM1JD07N3';
+export const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID || '';
 export type AnalyticsEvent = 'game_start' | 'game_end' | 'room_create' | 'room_join';
 type GameMode = 'single' | 'multi';
 type AnalyticsWindow = Window & {
@@ -7,13 +7,15 @@ type AnalyticsWindow = Window & {
   tokiGaInitialized?: boolean;
   tokiGaSeen?: Set<string>;
 };
-const STORAGE_KEY = 'toki.analytics.once.v1';
+const STORAGE_KEY = 'toki-gostop.analytics.once.v1';
 
 export function analyticsEnabled() {
   return (
     typeof window !== 'undefined' &&
     process.env.NODE_ENV === 'production' &&
-    window.location.hostname === 'toki-matgo.vercel.app' &&
+    !!process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID &&
+    window.location.origin === process.env.NEXT_PUBLIC_APP_ORIGIN &&
+    (typeof navigator === 'undefined' || navigator.onLine !== false) &&
     new URLSearchParams(window.location.search).get('debug') !== '1'
   );
 }
@@ -34,7 +36,7 @@ export function initializeAnalytics() {
     w.dataLayer!.push(arguments);
   };
   w.gtag('js', new Date());
-  w.gtag('config', GA_MEASUREMENT_ID, {
+  w.gtag('config', process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID, {
     page_location: window.location.origin + window.location.pathname,
     page_referrer: cleanUrl(document.referrer),
     allow_google_signals: false,

@@ -13,7 +13,7 @@ export const DEFAULT_PREFS: Preferences = {
 };
 export function readPreferences(): Preferences {
   try {
-    const p = JSON.parse(localStorage.getItem('toki.preferences.v1') ?? '{}');
+    const p = JSON.parse(localStorage.getItem('toki-gostop.preferences.v1') ?? '{}');
     return {
       speed: ['physical', 'normal', 'fast'].includes(p.speed) ? p.speed : 'physical',
       difficulty: ['easy', 'normal', 'hard'].includes(p.difficulty) ? p.difficulty : 'normal',
@@ -26,7 +26,7 @@ export function readPreferences(): Preferences {
 }
 export function savePreferences(p: Preferences) {
   try {
-    localStorage.setItem('toki.preferences.v1', JSON.stringify(p));
+    localStorage.setItem('toki-gostop.preferences.v1', JSON.stringify(p));
   } catch {}
 }
 let audio: AudioContext | undefined;

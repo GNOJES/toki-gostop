@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initializeAnalytics, trackAnalyticsOnce } from '../src/lib/analytics';
 
-function browser(hostname = 'toki-matgo.vercel.app', search = '?room=0123') {
+function browser(hostname = 'toki-gostop.vercel.app', search = '?room=0123') {
   const storage = new Map<string, string>();
   const w = {
     location: { hostname, origin: `https://${hostname}`, pathname: '/', search },
@@ -22,7 +22,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
-beforeEach(() => vi.stubEnv('NODE_ENV', 'production'));
+beforeEach(() => {
+  vi.stubEnv('NODE_ENV', 'production');
+  vi.stubEnv('NEXT_PUBLIC_APP_ORIGIN', 'https://toki-gostop.vercel.app');
+  vi.stubEnv('NEXT_PUBLIC_GA_MEASUREMENT_ID', 'G-GOSTOPTEST');
+});
 
 describe('GA4 minimal collection', () => {
   it('initializes only once and strips invitation queries from page and referrer', () => {
@@ -33,9 +37,9 @@ describe('GA4 minimal collection', () => {
     expect(configs).toHaveLength(1);
     expect(configs[0]).toEqual([
       'config',
-      'G-4TM1JD07N3',
+      'G-GOSTOPTEST',
       expect.objectContaining({
-        page_location: 'https://toki-matgo.vercel.app/',
+        page_location: 'https://toki-gostop.vercel.app/',
         page_referrer: 'https://example.com/',
         allow_google_signals: false,
         allow_ad_personalization_signals: false,
@@ -65,7 +69,7 @@ describe('GA4 minimal collection', () => {
     ]);
     expect(JSON.stringify(commands(w))).not.toContain('private-room');
   });
-  it.each(['localhost', 'toki-matgo-git-test-gnojes.vercel.app'])('excludes %s', (host) => {
+  it.each(['localhost', 'toki-gostop-git-test-gnojes.vercel.app'])('excludes %s', (host) => {
     const w = browser(host);
     initializeAnalytics();
     trackAnalyticsOnce('game_start', 'round', 'single');
@@ -94,4 +98,12 @@ describe('GA4 minimal collection', () => {
     });
     expect(() => trackAnalyticsOnce('game_end', 'other-round', 'single')).not.toThrow();
   });
+});
+
+it('does not send analytics without explicit new app config', () => {
+  const w = browser();
+  vi.stubEnv('NEXT_PUBLIC_GA_MEASUREMENT_ID', '');
+  initializeAnalytics();
+  trackAnalyticsOnce('game_start', 'id', 'single');
+  expect(w.dataLayer).toHaveLength(0);
 });
