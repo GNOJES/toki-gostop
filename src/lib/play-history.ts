@@ -1,95 +1,110 @@
-import type { GameResult, PlayerId } from '../game-engine/types';
-import type { Stats } from '../multiplayer/types';
-
-export const HISTORY_KEY = 'toki.play-history.v1';
+import type { GameResult, PointTransfer, SeatId, SeatTuple, EndReason } from '../game-engine/types';
+import { decodePoints } from '../game-engine/points';
+import { transferDelta } from '../game-engine/settlement';
+export const HISTORY_KEY = 'toki-gostop.play-history.v1';
 export interface PlayRecord {
   id: string;
   at: number;
   mode: 'single' | 'multi';
-  opponent: string;
-  outcome: 'win' | 'loss' | 'draw';
-  points: number;
-  reason: GameResult['reason'];
+  names: SeatTuple<string>;
+  me: SeatId;
+  winner: SeatId | null;
+  reason: EndReason;
+  ruleVersion: string;
+  delta: SeatTuple<string>;
 }
 export interface PlayHistory {
-  solo: { wins: number; losses: number; draws: number; points: number; opponentPoints: number };
+  solo: { wins: number; losses: number; draws: number; points: string };
   recent: PlayRecord[];
 }
+export interface ProgressInput {
+  gameId: string;
+  mode: 'single' | 'multi';
+  names: SeatTuple<string>;
+  me: SeatId;
+  transactions: PointTransfer[];
+  result: GameResult | null;
+  at?: number;
+}
 export const emptyHistory = (): PlayHistory => ({
-  solo: { wins: 0, losses: 0, draws: 0, points: 0, opponentPoints: 0 },
+  solo: { wins: 0, losses: 0, draws: 0, points: '0' },
   recent: [],
 });
-const count = (n: unknown): n is number =>
-  typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 export function parseHistory(raw: string | null): PlayHistory {
   try {
     const h = JSON.parse(raw ?? 'null');
+    if (!h?.solo || !Array.isArray(h.recent)) return emptyHistory();
     if (
-      !h?.solo ||
-      !['wins', 'losses', 'draws', 'points', 'opponentPoints'].every((key) => count(h.solo[key])) ||
-      !Array.isArray(h.recent)
+      !['wins', 'losses', 'draws'].every((k) => Number.isSafeInteger(h.solo[k]) && h.solo[k] >= 0)
     )
       return emptyHistory();
+    decodePoints(h.solo.points);
     const recent = h.recent
-      .filter(
-        (r: PlayRecord) =>
-          r &&
-          typeof r.id === 'string' &&
-          count(r.at) &&
-          r.at <= 8640000000000000 &&
-          ['single', 'multi'].includes(r.mode) &&
-          typeof r.opponent === 'string' &&
-          ['win', 'loss', 'draw'].includes(r.outcome) &&
-          count(r.points) &&
-          ['STOP', 'NAGARI', 'CHONGTONG', 'THREE_PPUK', 'HEODANG'].includes(r.reason),
-      )
+      .filter((r: PlayRecord) => {
+        try {
+          return (
+            typeof r.id === 'string' &&
+            Number.isSafeInteger(r.at) &&
+            r.at >= 0 &&
+            r.at <= 8640000000000000 &&
+            ['single', 'multi'].includes(r.mode) &&
+            [0, 1, 2].includes(r.me) &&
+            (r.winner === null || [0, 1, 2].includes(r.winner)) &&
+            ['STOP', 'NAGARI', 'CHONGTONG', 'THREE_PPUK'].includes(r.reason) &&
+            typeof r.ruleVersion === 'string' &&
+            r.names.length === 3 &&
+            r.names.every((n) => typeof n === 'string') &&
+            r.delta.length === 3 &&
+            r.delta.every((n) => typeof decodePoints(n) === 'bigint')
+          );
+        } catch {
+          return false;
+        }
+      })
       .slice(0, 100);
-    return { solo: h.solo, recent };
+    return { solo: { ...h.solo }, recent };
   } catch {
     return emptyHistory();
   }
 }
-export function addResult(
+export function applyProgress(
   history: PlayHistory,
-  input: {
-    id: string;
-    mode: PlayRecord['mode'];
-    opponent: string;
-    me: PlayerId;
-    result: GameResult;
-    at?: number;
-  },
+  input: ProgressInput,
+  seen: Set<string>,
+  done: Set<string>,
 ): PlayHistory {
-  if (history.recent.some((r) => r.id === input.id)) return history;
-  const { result: r, me } = input;
-  const outcome: PlayRecord['outcome'] =
-    r.winner === null ? 'draw' : r.winner === me ? 'win' : 'loss';
-  const solo = { ...history.solo };
-  if (input.mode === 'single') {
-    solo[outcome === 'win' ? 'wins' : outcome === 'loss' ? 'losses' : 'draws']++;
-    solo.points += r.sidePoints[me] + (r.winner === me ? r.points : 0);
-    solo.opponentPoints += r.sidePoints[1 - me] + (r.winner === 1 - me ? r.points : 0);
+  const h: PlayHistory = { solo: { ...history.solo }, recent: [...history.recent] };
+  let points = BigInt(h.solo.points);
+  for (const t of input.transactions) {
+    if (seen.has(t.id)) continue;
+    if (t.amount <= 0n || t.from === t.to) throw Error('Invalid transfer');
+    seen.add(t.id);
+    if (input.mode === 'single') {
+      if (t.to === input.me) points += t.amount;
+      if (t.from === input.me) points -= t.amount;
+    }
   }
-  return {
-    solo,
-    recent: [
-      {
-        id: input.id,
-        at: input.at ?? Date.now(),
-        mode: input.mode,
-        opponent: input.opponent,
-        outcome,
-        points: r.points,
-        reason: r.reason,
-      },
-      ...history.recent,
-    ].slice(0, 100),
-  };
+  h.solo.points = points.toString();
+  if (input.result && !done.has(input.gameId)) {
+    done.add(input.gameId);
+    const r = input.result;
+    if (input.mode === 'single')
+      h.solo[r.winner === null ? 'draws' : r.winner === input.me ? 'wins' : 'losses']++;
+    h.recent.unshift({
+      id: input.gameId,
+      at: input.at ?? Date.now(),
+      mode: input.mode,
+      names: [...input.names],
+      me: input.me,
+      winner: r.winner,
+      reason: r.reason,
+      ruleVersion: 'gostop-v1',
+      delta: transferDelta(input.transactions).map((n) => n.toString()) as SeatTuple<string>,
+    });
+    h.recent = h.recent.slice(0, 100);
+  }
+  return h;
 }
-export const soloStats = (h: PlayHistory): Stats => ({
-  wins: [h.solo.wins, h.solo.losses],
-  points: [h.solo.points, h.solo.opponentPoints],
-});
 export const resetSolo = (h: PlayHistory): PlayHistory => ({
   solo: emptyHistory().solo,
   recent: h.recent.filter((r) => r.mode !== 'single'),

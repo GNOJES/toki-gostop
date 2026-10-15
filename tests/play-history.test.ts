@@ -1,61 +1,81 @@
-import { it, expect } from 'vitest';
-import {
-  emptyHistory,
-  addResult,
-  parseHistory,
-  resetSolo,
-  soloStats,
-} from '../src/lib/play-history';
-import type { GameResult } from '../src/game-engine/types';
-const result: GameResult = {
-  winner: 0,
-  reason: 'STOP',
-  points: 7,
-  sidePoints: [2, 3],
-  score: null,
+import { expect, it } from 'vitest';
+import { emptyHistory, applyProgress, parseHistory, resetSolo } from '../src/lib/play-history';
+import type { ProgressInput } from '../src/lib/play-history';
+const instant = {
+  id: 'g:instant',
+  from: 1 as const,
+  to: 0 as const,
+  amount: 3n,
+  kind: 'INSTANT' as const,
+  reason: 'OPENING_PPUK' as const,
 };
-const single = {
-  id: 'a',
-  mode: 'single' as const,
-  me: 0 as const,
-  opponent: '토끼',
-  result,
-  at: 1000,
-};
-
-it('counts wins, losses, draws and both instant scores across persisted sessions', () => {
-  let h = addResult(emptyHistory(), single);
-  h = parseHistory(JSON.stringify(h));
-  h = addResult(h, { ...single, id: 'b', result: { ...result, winner: 1 } });
-  h = addResult(h, {
-    ...single,
-    id: 'c',
-    result: { ...result, winner: null, points: 0, reason: 'NAGARI' },
-  });
-  expect(h.solo).toEqual({ wins: 1, losses: 1, draws: 1, points: 13, opponentPoints: 16 });
-  expect(soloStats(h)).toEqual({ wins: [1, 1], points: [13, 16] });
-  expect(addResult(h, single)).toBe(h);
+function input(id = 'g', mode: 'single' | 'multi' = 'single'): ProgressInput {
+  return {
+    gameId: id,
+    mode,
+    names: ['나', '토끼 하나', '토끼 둘'],
+    me: 0,
+    transactions: [{ ...instant, id: `${id}:instant` }],
+    result: null,
+    at: 123,
+  };
+}
+function end(i: ProgressInput): ProgressInput {
+  return {
+    ...i,
+    result: {
+      winner: 0,
+      reason: 'STOP',
+      settlement: {
+        baseScore: 3,
+        commonMultiplier: 1n,
+        liabilities: [0n, 3n, 3n],
+        payerFor: [null, 1, 2],
+        transfers: [],
+        roundDelta: [3n, -3n, 0n],
+      },
+    },
+  };
+}
+it('preserves immediate points before completion without a completed record', () => {
+  const seen = new Set<string>(),
+    done = new Set<string>();
+  const h = applyProgress(emptyHistory(), input(), seen, done);
+  expect(h.solo.points).toBe('3');
+  expect(h.solo.wins).toBe(0);
+  expect(h.recent).toHaveLength(0);
+  const next = applyProgress(h, end(input()), seen, done);
+  expect(next.solo.points).toBe('3');
+  expect(next.solo.wins).toBe(1);
+  expect(next.recent[0].delta).toEqual(['3', '-3', '0']);
+  expect(applyProgress(next, end(input()), seen, done)).toEqual(next);
 });
-it('keeps cumulative totals beyond 100 recent rounds', () => {
+it('keeps cumulative results and deduplication beyond a hundred recent rounds', () => {
+  const seen = new Set<string>(),
+    done = new Set<string>();
   let h = emptyHistory();
-  for (let i = 0; i < 130; i++) h = addResult(h, { ...single, id: String(i) });
+  for (let n = 0; n < 102; n++) h = applyProgress(h, end(input(`g${n}`)), seen, done);
   expect(h.recent).toHaveLength(100);
-  expect(h.recent[0].id).toBe('129');
-  expect(h.solo.wins).toBe(130);
-  expect(h.solo.points).toBe(1170);
+  expect(h.solo.wins).toBe(102);
+  expect(h.solo.points).toBe('306');
+  expect(applyProgress(h, end(input('g0')), seen, done)).toEqual(h);
 });
-it('records friends from the local player perspective without changing solo totals and preserves them on reset', () => {
-  const solo = addResult(emptyHistory(), single);
-  const h = addResult(solo, { ...single, id: 'friend', mode: 'multi', me: 1, opponent: '친구' });
-  expect(h.recent[0].outcome).toBe('loss');
-  expect(h.solo).toEqual(solo.solo);
-  const cleared = resetSolo(h);
-  expect(cleared.solo).toEqual(emptyHistory().solo);
-  expect(cleared.recent.map((r) => r.id)).toEqual(['friend']);
+it('records friends independently and reset leaves replay tombstones and friends intact', () => {
+  const seen = new Set<string>(),
+    done = new Set<string>();
+  let h = applyProgress(emptyHistory(), end(input()), seen, done);
+  h = applyProgress(h, end(input('multi', 'multi')), seen, done);
+  h = resetSolo(h);
+  expect(h.solo.points).toBe('0');
+  expect(h.recent.map((r) => r.mode)).toEqual(['multi']);
+  expect(applyProgress(h, end(input()), seen, done)).toEqual(h);
 });
-it('recovers from missing or corrupt browser storage and invalid dates', () => {
-  for (const raw of [null, '{', '{}', JSON.stringify({ solo: { wins: -1 }, recent: [] })])
-    expect(parseHistory(raw)).toEqual(emptyHistory());
-  const h = addResult(emptyHistory(), { ...single, at: Number.MAX_SAFE_INTEGER });
-  expect(parseHistory(JSON.stringify(h)).recent).toHaveLength(0);
+it('recovers corrupt storage and round trips signed large points', () => {
+  expect(parseHistory('{oops')).toEqual(emptyHistory());
+  const i = input();
+  i.me = 1;
+  i.transactions[0].amount = 2n ** 80n;
+  const h = applyProgress(emptyHistory(), i, new Set(), new Set());
+  expect(h.solo.points).toBe('-1208925819614629174706176');
+  expect(parseHistory(JSON.stringify(h))).toEqual(h);
 });
