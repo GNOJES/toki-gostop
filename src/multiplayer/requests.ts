@@ -23,7 +23,7 @@ export function isRequest(value: unknown): value is Request {
   const a = value.action;
   if (!object(a)) return false;
   if (a.type === 'NEXT_ROUND') return fields(a, ['type']);
-  if (a.player !== 0 && a.player !== 1) return false;
+  if (a.player !== 0 && a.player !== 1 && a.player !== 2) return false;
   switch (a.type) {
     case 'PLAY_CARD':
     case 'SELECT_FLOOR':

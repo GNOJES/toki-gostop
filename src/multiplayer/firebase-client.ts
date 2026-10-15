@@ -31,8 +31,8 @@ async function initialize() {
     db = getDatabase(app);
   if (emulators && !existing) {
     const host = process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST ?? '127.0.0.1';
-    connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
-    connectDatabaseEmulator(db, host, 9000);
+    connectAuthEmulator(auth, `http://${host}:9199`, { disableWarnings: true });
+    connectDatabaseEmulator(db, host, 9100);
   }
   await setPersistence(auth, browserLocalPersistence);
   await auth.authStateReady();

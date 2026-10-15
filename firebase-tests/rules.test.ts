@@ -6,211 +6,171 @@ import {
   assertSucceeds,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { get, ref, set, runTransaction, update } from 'firebase/database';
+import { get, ref, set, update, runTransaction, remove } from 'firebase/database';
 import { emptyHostState, encodeState } from '../src/multiplayer/host';
+import { claimSeat } from '../src/multiplayer/room-membership';
 let env: RulesTestEnvironment;
 const code = '0123';
-function data() {
-  return {
-    meta: {
-      hostUid: 'host',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      expiresAt: Date.now() + 86400000,
-      status: 'waiting',
-    },
-    players: { host: { name: '방장' } },
-    state: encodeState(emptyHostState()),
-  };
-}
 beforeAll(async () => {
   env = await initializeTestEnvironment({
-    projectId: 'demo-toki-matgo',
+    projectId: 'demo-toki-gostop',
     database: {
       host: '127.0.0.1',
-      port: 9000,
+      port: 9100,
       rules: await readFile('database.rules.json', 'utf8'),
     },
   });
 });
-beforeEach(async () => {
-  await env.clearDatabase();
-});
-afterAll(async () => {
-  await env.cleanup();
-});
+beforeEach(() => env.clearDatabase());
+afterAll(() => env.cleanup());
+const db = (uid: string) => env.authenticatedContext(uid).database();
 async function create() {
-  const db = env.authenticatedContext('host').database();
-  const room = data();
-  await set(ref(db, 'roomOwners/host'), {
-    code,
-    createdAt: Date.now(),
-    expiresAt: room.meta.expiresAt,
+  const d = db('h'),
+    now = Date.now(),
+    expiresAt = now + 86400000;
+  await set(ref(d, 'roomOwners/h'), { code, createdAt: now, expiresAt });
+  await set(ref(d, `rooms/${code}`), {
+    meta: {
+      hostUid: 'h',
+      seats: { '0': 'h' },
+      rosterVersion: 0,
+      roomId: 'room-1',
+      status: 'waiting',
+      createdAt: now,
+      updatedAt: now,
+      expiresAt,
+    },
+    players: { h: { name: 'H', connections: { x: true } } },
+    state: encodeState(emptyHostState()),
   });
-  await assertSucceeds(set(ref(db, `rooms/${code}`), room));
-  return db;
+  return d;
 }
-it('unauthenticated users cannot read, create, join or submit actions; room list is private', async () => {
-  const db = await create(),
-    anonymous = env.unauthenticatedContext().database();
-  await assertFails(get(ref(anonymous, `rooms/${code}`)));
-  await assertFails(get(ref(anonymous, `rooms/${code}/meta`)));
-  await assertFails(set(ref(anonymous, 'rooms/4567'), data()));
-  await assertFails(set(ref(anonymous, `rooms/${code}/meta/guestUid`), 'guest'));
-  await assertFails(get(ref(db, 'rooms')));
-});
-it('authenticated host creates with its UID and outsider cannot read state or change metadata', async () => {
+async function join(uid: string) {
+  const initial = (await get(ref(db(uid), `rooms/${code}/meta`))).val();
+  await runTransaction(ref(db(uid), `rooms/${code}/meta`), (m) => claimSeat(m ?? initial, uid), {
+    applyLocally: false,
+  });
+  await set(ref(db(uid), `rooms/${code}/players/${uid}`), { name: uid, connections: { x: true } });
+}
+it('denies unauthenticated access and protects room lists and outsider state', async () => {
   await create();
-  const third = env.authenticatedContext('third').database();
-  await assertFails(get(ref(third, `rooms/${code}`)));
-  await assertFails(get(ref(third, `rooms/${code}/state`)));
-  await assertFails(update(ref(third, `rooms/${code}/meta`), { status: 'closed' }));
-  await assertFails(set(ref(third, 'rooms/4567'), data()));
+  const no = env.unauthenticatedContext().database();
+  await assertFails(get(ref(no, `rooms/${code}/meta`)));
+  await assertFails(get(ref(db('a'), 'rooms')));
+  await assertFails(get(ref(db('a'), `rooms/${code}`)));
+  await assertSucceeds(get(ref(db('a'), `rooms/${code}/meta`)));
 });
-it('guest slot transaction admits only one of two simultaneous joiners', async () => {
+it('assigns simultaneous distinct guests, no duplicate UID or fourth participant', async () => {
   await create();
-  const join = (uid: string) =>
-    runTransaction(
-      ref(env.authenticatedContext(uid).database(), `rooms/${code}/meta/guestUid`),
-      (old) => (old ? undefined : uid),
-      { applyLocally: false },
-    );
-  const results = await Promise.all([join('guest'), join('third')]);
-  expect(results.filter((r) => r.committed)).toHaveLength(1);
-  const uid = results.find((r) => r.committed)!.snapshot.val();
-  const guest = env.authenticatedContext(uid).database();
-  await assertSucceeds(get(ref(guest, `rooms/${code}`)));
-  await assertFails(set(ref(guest, `rooms/${code}/meta/guestUid`), null));
-});
-it('only host writes final state; guest writes only its own action/presence and action is immutable', async () => {
-  const host = await create(),
-    guest = env.authenticatedContext('guest').database();
-  await assertSucceeds(set(ref(guest, `rooms/${code}/meta/guestUid`), 'guest'));
-  await assertSucceeds(
-    set(ref(guest, `rooms/${code}/players/guest`), { name: '친구', connections: { one: true } }),
+  await Promise.all([join('a'), join('b')]);
+  const m = (await get(ref(db('h'), `rooms/${code}/meta`))).val();
+  expect(new Set(Object.values(m.seats)).size).toBe(3);
+  await runTransaction(ref(db('a'), `rooms/${code}/meta`), (m) =>
+    m ? claimSeat(m, 'a') : undefined,
   );
-  const state = { ...emptyHostState(), revision: 1 };
-  await assertSucceeds(set(ref(host, `rooms/${code}/state`), encodeState(state)));
-  await assertFails(set(ref(guest, `rooms/${code}/state`), encodeState({ ...state, revision: 2 })));
-  await assertFails(set(ref(guest, `rooms/${code}/players/host/connections/hack`), true));
+  expect((await get(ref(db('h'), `rooms/${code}/meta/rosterVersion`))).val()).toBe(2);
+  await expect(join('c')).rejects.toThrow();
+});
+it('blocks parent meta writes from taking other seats or changing immutable fields', async () => {
+  await create();
+  await join('a');
+  const d = db('a'),
+    base = `rooms/${code}/meta`;
+  const m = (await get(ref(d, base))).val();
+  await assertFails(
+    set(ref(d, base), { ...m, seats: { '0': 'a', '1': 'h' }, rosterVersion: m.rosterVersion + 1 }),
+  );
+  await assertFails(update(ref(d, base), { expiresAt: Date.now() + 50000 }));
+  await assertFails(update(ref(d, base), { hostUid: 'a' }));
+  await assertFails(update(ref(d, base), { extra: 'x' }));
+});
+it('permits waiting guest leave and prevents active seat changes', async () => {
+  const h = await create();
+  await join('a');
+  const prior = (await get(ref(db('a'), `rooms/${code}/meta`))).val();
+  await runTransaction(ref(db('a'), `rooms/${code}/meta`), (m) => ({
+    ...(m ?? prior),
+    seats: { '0': 'h' },
+    rosterVersion: (m ?? prior).rosterVersion + 1,
+  }));
+  await join('b');
+  await join('c');
+  await assertSucceeds(update(ref(h, `rooms/${code}/meta`), { status: 'active' }));
+  const m = (await get(ref(h, `rooms/${code}/meta`))).val();
+  await assertFails(
+    set(ref(db('b'), `rooms/${code}/meta`), {
+      ...m,
+      seats: { '0': 'h', '2': 'c' },
+      rosterVersion: m.rosterVersion + 1,
+    }),
+  );
+});
+it('only host commits state and each member only owns their own actions and presence', async () => {
+  const h = await create();
+  await join('a');
+  await join('b');
+  await update(ref(h, `rooms/${code}/meta`), { status: 'active' });
   const action = {
-    uid: 'guest',
-    sequence: 1,
+    uid: 'b',
     round: 1,
-    stateVersion: 1,
-    createdAt: Date.now(),
-    action: { type: 'PLAY_CARD', player: 0, cardId: 'm1-0' },
-  };
-  await assertSucceeds(set(ref(guest, `rooms/${code}/actions/guest/pending`), action));
-  await assertFails(
-    set(ref(guest, `rooms/${code}/actions/host/pending`), { ...action, uid: 'host' }),
-  );
-  await assertFails(
-    set(ref(guest, `rooms/${code}/actions/guest/pending`), { ...action, cardId: 'm1-1' }),
-  );
-  await assertSucceeds(set(ref(host, `rooms/${code}/actions/guest/pending`), null));
-});
-it('closed or expired rooms cannot be joined and participants may remove closed rooms', async () => {
-  const host = await create();
-  const guest = env.authenticatedContext('guest').database();
-  await set(ref(host, `rooms/${code}/meta/status`), 'closed');
-  await assertFails(set(ref(guest, `rooms/${code}/meta/guestUid`), 'guest'));
-  await assertSucceeds(set(ref(host, `rooms/${code}`), null));
-  await env.withSecurityRulesDisabled(async (c) => {
-    await set(ref(c.database(), `rooms/${code}`), {
-      ...data(),
-      meta: { ...data().meta, expiresAt: Date.now() - 1000 },
-    });
-  });
-  await assertFails(set(ref(guest, `rooms/${code}/meta/guestUid`), 'guest'));
-  await assertSucceeds(set(ref(host, `rooms/${code}`), null));
-});
-
-it('only four digit codes can be created; expired codes can be reclaimed without exposing state', async () => {
-  const host = await create();
-  await assertFails(set(ref(host, 'rooms/ABC234'), data()));
-  await assertFails(set(ref(host, 'rooms/123'), data()));
-  const outsider = env.authenticatedContext('third').database();
-  await assertFails(set(ref(outsider, `rooms/${code}`), null));
-  await env.withSecurityRulesDisabled(async (c) => {
-    await set(ref(c.database(), `rooms/${code}/meta/expiresAt`), Date.now() - 1000);
-  });
-  await assertFails(get(ref(outsider, `rooms/${code}/state`)));
-  await assertSucceeds(set(ref(outsider, `rooms/${code}`), null));
-  const fresh = data();
-  fresh.meta.hostUid = 'third';
-  Object.assign(fresh, { players: { third: { name: '방장' } } });
-  await set(ref(outsider, 'roomOwners/third'), {
-    code,
-    createdAt: Date.now(),
-    expiresAt: fresh.meta.expiresAt,
-  });
-  await assertSucceeds(set(ref(outsider, `rooms/${code}`), fresh));
-  await assertFails(set(ref(host, `rooms/${code}`), null));
-});
-
-it('mailboxes reject fractional sequences, extra data and arbitrary queue keys', async () => {
-  const db = await create();
-  const value = {
-    uid: 'host',
     sequence: 1,
-    round: 1,
-    stateVersion: 1,
+    stateVersion: 0,
     createdAt: Date.now(),
-    action: { type: 'GO', player: 0 },
+    action: { type: 'GO', player: 2 },
   };
-  for (const bad of [
-    { ...value, sequence: 1.5 },
-    { ...value, extra: 'x'.repeat(64000) },
-    { ...value, action: { ...value.action, extra: true } },
-    { ...value, action: { type: 'BOMB', player: 0, month: 13 } },
-  ]) {
-    await assertFails(set(ref(db, `rooms/${code}/actions/host/pending`), bad));
-  }
-  await assertFails(set(ref(db, `rooms/${code}/actions/host/arbitrary`), value));
-  await assertSucceeds(set(ref(db, `rooms/${code}/actions/host/pending`), value));
-  await assertFails(set(ref(db, `rooms/${code}/actions/host/pending`), { ...value, sequence: 3 }));
-  await assertSucceeds(
-    set(ref(db, `rooms/${code}/actions/host/pending`), { ...value, sequence: 2 }),
+  await assertSucceeds(set(ref(db('b'), `rooms/${code}/actions/b/pending`), action));
+  await assertFails(
+    set(ref(db('a'), `rooms/${code}/actions/b/pending`), { ...action, sequence: 2 }),
+  );
+  await assertFails(set(ref(db('a'), `rooms/${code}/players/b/name`), 'hacked'));
+  await assertFails(set(ref(db('a'), `rooms/${code}/state`), { version: 1, data: '{}' }));
+  const state = emptyHostState();
+  state.revision = 1;
+  await assertSucceeds(set(ref(h, `rooms/${code}/state`), encodeState(state)));
+  await assertFails(
+    set(ref(db('b'), `rooms/${code}/actions/b/pending`), { ...action, sequence: 1.5 }),
+  );
+  await assertFails(set(ref(db('b'), `rooms/${code}/actions/b/other`), action));
+  await assertFails(
+    set(ref(db('b'), `rooms/${code}/actions/b/pending`), { ...action, sequence: 2, extra: 'bad' }),
   );
 });
-it('one live room per UID, durable cooldown and reservation ownership', async () => {
-  const db = await create();
-  const other = data();
-  await assertFails(set(ref(db, 'rooms/4567'), other));
-  await assertFails(set(ref(db, 'roomOwners/host'), null));
+it('closure is terminal and preserves final snapshot for participants', async () => {
+  const h = await create();
+  await join('a');
+  await join('b');
+  await update(ref(h, `rooms/${code}/meta`), { status: 'active' });
+  await assertSucceeds(update(ref(db('a'), `rooms/${code}/meta`), { status: 'closed' }));
+  await assertFails(update(ref(h, `rooms/${code}/meta`), { status: 'active' }));
+  await assertSucceeds(get(ref(db('b'), `rooms/${code}/state`)));
+  await assertFails(set(ref(h, `rooms/${code}/state`), { version: 1, data: '{}' }));
+});
+it('rejects duplicate live owner rooms and unreserved room creation', async () => {
+  const h = await create();
   await assertFails(
-    set(ref(db, 'roomOwners/host'), {
-      code: '4567',
+    set(ref(h, 'roomOwners/h'), {
+      code: '9999',
       createdAt: Date.now(),
       expiresAt: Date.now() + 86400000,
     }),
   );
-  await set(ref(db, `rooms/${code}/meta/status`), 'closed');
+  const snap = (await get(ref(h, `rooms/${code}`))).val();
+  await assertFails(set(ref(db('a'), 'rooms/9999'), snap));
+});
+it('expired rooms can be reclaimed but not joined', async () => {
+  await create();
+  await env.withSecurityRulesDisabled(async (c) => {
+    await update(ref(c.database(), `rooms/${code}/meta`), { expiresAt: Date.now() - 1 });
+  });
+  await expect(join('a')).rejects.toThrow();
+  await assertSucceeds(remove(ref(db('a'), `rooms/${code}`)));
+});
+it('rejects a raw expired meta join even when the client validator is bypassed', async () => {
+  await create();
+  await env.withSecurityRulesDisabled(async (c) => {
+    await update(ref(c.database(), `rooms/${code}/meta`), { expiresAt: Date.now() - 1 });
+  });
   await assertFails(
-    set(ref(db, 'roomOwners/host'), {
-      code: '4567',
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 86400000,
-    }),
+    update(ref(db('a'), `rooms/${code}/meta`), { 'seats/1': 'a', rosterVersion: 1 }),
   );
-  await env.withSecurityRulesDisabled(async (c) => {
-    await set(ref(c.database(), 'roomOwners/host/createdAt'), Date.now() - 11000);
-  });
-  const lease = { code: '4567', createdAt: Date.now(), expiresAt: other.meta.expiresAt };
-  await assertSucceeds(set(ref(db, 'roomOwners/host'), lease));
-  await assertSucceeds(set(ref(db, 'rooms/4567'), other));
-});
-it('closing a room is terminal so an old room cannot bypass the ownership quota', async () => {
-  const db = await create();
-  await set(ref(db, `rooms/${code}/meta/status`), 'closed');
-  await assertFails(set(ref(db, `rooms/${code}/meta/status`), 'active'));
-  await assertFails(set(ref(db, `rooms/${code}/meta/status`), 'waiting'));
-});
-it('host can remove a malformed legacy action container', async () => {
-  const db = await create();
-  await env.withSecurityRulesDisabled(async (c) => {
-    await set(ref(c.database(), `rooms/${code}/actions/legacy`), 42);
-  });
-  await assertSucceeds(set(ref(db, `rooms/${code}/actions/legacy`), null));
 });

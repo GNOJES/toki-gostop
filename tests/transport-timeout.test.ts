@@ -16,7 +16,7 @@ it('times out the whole action even if the write never acknowledges', async () =
   Object.assign(t, {
     connected: true,
     room: {
-      meta: { hostUid: 'host', expiresAt: Date.now() + 100000 },
+      meta: { hostUid: 'host', seats: { '0': 'host' }, expiresAt: Date.now() + 100000 },
       state: encodeState(emptyHostState()),
     },
   });
@@ -46,7 +46,7 @@ it('a late failed write cannot reject a newer retry with the same sequence', asy
   Object.assign(t, {
     connected: true,
     room: {
-      meta: { hostUid: 'host', expiresAt: Date.now() + 100000 },
+      meta: { hostUid: 'host', seats: { '0': 'host' }, expiresAt: Date.now() + 100000 },
       state: encodeState(emptyHostState()),
     },
   });

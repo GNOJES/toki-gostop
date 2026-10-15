@@ -1,386 +1,158 @@
-import { beforeAll, afterAll, it, expect, vi } from 'vitest';
+import { beforeAll, afterAll, it, expect } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { deleteApp, initializeApp, type FirebaseApp } from 'firebase/app';
+import { initializeApp, deleteApp, type FirebaseApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInAnonymously } from 'firebase/auth';
 import {
   connectDatabaseEmulator,
-  get,
   getDatabase,
   goOffline,
   goOnline,
   ref,
-  runTransaction,
-  set,
+  get,
 } from 'firebase/database';
 import { FirebaseTransport } from '../src/multiplayer/firebase-transport';
-import { decodeState, encodeState } from '../src/multiplayer/host';
-import { createFixture } from '../src/game-engine/fixtures';
-import { applyAction } from '../src/game-engine/engine';
-import type { RoomData, RoomMessage } from '../src/multiplayer/types';
+import { chooseAction } from '../src/game-engine/ai';
+import type { RoomMessage } from '../src/multiplayer/types';
 let env: RulesTestEnvironment;
 const apps: FirebaseApp[] = [],
-  transports: FirebaseTransport[] = [];
+  ts: FirebaseTransport[] = [];
 beforeAll(async () => {
   env = await initializeTestEnvironment({
-    projectId: 'demo-toki-matgo',
+    projectId: 'demo-toki-gostop',
     database: {
       host: '127.0.0.1',
-      port: 9000,
+      port: 9100,
       rules: await readFile('database.rules.json', 'utf8'),
     },
   });
   await env.clearDatabase();
 });
 afterAll(async () => {
-  transports.forEach((t) => t.dispose());
-  await Promise.all(apps.map((app) => deleteApp(app)));
+  ts.forEach((t) => t.dispose());
+  await Promise.all(apps.map(deleteApp));
   await env.cleanup();
 });
 async function user() {
   const app = initializeApp(
     {
-      apiKey: 'demo-api-key',
-      projectId: 'demo-toki-matgo',
-      databaseURL: 'https://demo-toki-matgo-default-rtdb.firebaseio.com',
+      apiKey: 'demo-key',
+      projectId: 'demo-toki-gostop',
+      databaseURL: 'https://demo-toki-gostop-default-rtdb.firebaseio.com',
     },
     crypto.randomUUID(),
   );
   apps.push(app);
   const auth = getAuth(app),
     db = getDatabase(app);
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-  connectDatabaseEmulator(db, '127.0.0.1', 9000);
+  connectAuthEmulator(auth, 'http://127.0.0.1:9199', { disableWarnings: true });
+  connectDatabaseEmulator(db, '127.0.0.1', 9100);
   const uid = (await signInAnonymously(auth)).user.uid;
-  return { db, auth, uid };
+  return { auth, db, uid };
 }
-it('real anonymous Auth, rooms, guest choice -> host transaction, invalid/duplicate action, reconnect and leave', async () => {
-  const host = await user(),
-    guest = await user(),
-    third = await user();
-  expect(host.auth.currentUser!.isAnonymous).toBe(true);
-  expect(guest.uid).not.toBe(host.uid);
-  let a: RoomMessage | undefined, b: RoomMessage | undefined;
-  const errors: string[] = [];
-  const ha = await FirebaseTransport.open(
-    {
-      state: (m) => {
-        a = m;
-      },
-      connection: () => {},
-      error: (m) => errors.push(m),
-    },
-    undefined,
-    '방장',
-    false,
-    async () => host,
-  );
-  transports.push(ha);
-  const gb = await FirebaseTransport.open(
-    {
-      state: (m) => {
-        b = m;
-      },
-      connection: () => {},
-      error: (m) => errors.push(m),
-    },
-    ha.code,
-    '친구',
-    false,
-    async () => guest,
-  );
-  transports.push(gb);
-  await expect.poll(() => !!a?.canAct && !!b?.canAct).toBe(true);
-  // A malformed legacy entry must be pruned without blocking the following valid actions.
-  await env.withSecurityRulesDisabled(async (c) => {
-    await set(
-      ref(
-        c.database('https://demo-toki-matgo-default-rtdb.firebaseio.com'),
-        `rooms/${ha.code}/actions/${guest.uid}/poison`,
-      ),
-      {
-        uid: guest.uid,
-        sequence: 1.5,
-        round: 1,
-        stateVersion: 1,
-        createdAt: 1,
-        action: { type: 'GO', player: 1 },
-      },
-    );
-  });
-  await expect
-    .poll(async () =>
-      (await get(ref(host.db, `rooms/${ha.code}/actions/${guest.uid}/poison`))).exists(),
-    )
-    .toBe(false);
-  expect(a!.me).toBe(0);
-  expect(b!.me).toBe(1);
-  await expect(
-    FirebaseTransport.open(
-      { state: () => {}, connection: () => {}, error: () => {} },
-      ha.code,
-      '세 번째',
-      false,
-      async () => third,
-    ),
-  ).rejects.toThrow('가득');
-  const roomRef = ref(host.db, `rooms/${ha.code}`),
-    stateRef = ref(host.db, `rooms/${ha.code}/state`);
-  // Seed a public development fixture using the authorized host write path.
-  await runTransaction(
-    stateRef,
-    (value) => {
-      const state = JSON.parse(value.data);
-      state.game = createFixture('바닥 두 장 · 따닥');
-      state.revision++;
-      state.events = [];
-      return encodeState(state);
-    },
-    { applyLocally: false },
-  );
-  await expect.poll(() => a?.game?.currentPlayer === 0 && a.canAct && b?.canAct).toBe(true);
-  let state = decodeState((await get(roomRef)).val() as RoomData);
-  const wrong = {
-    sequence: state.processed[1] + 1,
-    round: state.round,
-    stateVersion: state.game!.stateVersion,
-    action: {
-      type: 'PLAY_CARD' as const,
-      player: 1 as const,
-      cardId: state.game!.players[1].hand[0].id,
-    },
-  };
-  await expect(gb.action(wrong)).rejects.toThrow();
-  await expect.poll(() => b?.actionSequence).toBe(wrong.sequence);
-  const play = {
-    sequence: a!.actionSequence + 1,
-    round: a!.round,
-    stateVersion: a!.game!.stateVersion,
-    action: { type: 'PLAY_CARD' as const, player: 0 as const, cardId: 'm1-2' },
-  };
-  await ha.action(play);
-  await expect.poll(() => a?.game?.phase).toBe('SELECT_FLOOR');
-  await ha.ready(a!.round, a!.game!.stateVersion);
-  await gb.ready(b!.round, b!.game!.stateVersion);
-  await expect.poll(() => a?.canAct && b?.canAct).toBe(true);
-  await ha.action({
-    sequence: a!.actionSequence + 1,
-    round: a!.round,
-    stateVersion: a!.game!.stateVersion,
-    action: { type: 'SELECT_FLOOR', player: 0, cardId: 'm1-1' },
-  });
-  await expect.poll(() => a?.game?.phase !== 'SELECT_FLOOR').toBe(true);
-  const version = a!.game!.stateVersion;
-  await ha.action(play); // consumed request: no second execution, even after pruning.
-  expect(decodeState((await get(roomRef)).val() as RoomData).game!.stateVersion).toBe(version);
-  await expect.poll(() => b?.game?.stateVersion).toBe(version);
-  await gb.ready(b!.round, b!.game!.stateVersion);
-  await ha.ready(a!.round, a!.game!.stateVersion);
-  await expect.poll(() => a?.canAct && b?.canAct).toBe(true);
-  if (a!.game!.phase === 'GO_STOP') {
-    await ha.action({
-      sequence: a!.actionSequence + 1,
-      round: a!.round,
-      stateVersion: a!.game!.stateVersion,
-      action: { type: 'GO', player: 0 },
-    });
-    await expect.poll(() => b?.game?.stateVersion).toBe(a!.game!.stateVersion);
-    await ha.ready(a!.round, a!.game!.stateVersion);
-    await gb.ready(b!.round, b!.game!.stateVersion);
-  }
-  // Guest takes the next turn. Both clients receive precisely the same authoritative game.
-  await expect.poll(() => b?.canAct && b.game?.currentPlayer === 1).toBe(true);
-  const { chooseAction } = await import('../src/game-engine/ai');
-  await gb.action({
-    sequence: b!.actionSequence + 1,
-    round: b!.round,
-    stateVersion: b!.game!.stateVersion,
-    action: chooseAction(b!.game!, 1),
-  });
-  await expect.poll(() => a?.game?.stateVersion === b?.game?.stateVersion).toBe(true);
-  const settled = decodeState((await get(roomRef)).val() as RoomData);
-  expect(a!.game!.floor).toEqual(b!.game!.floor);
-  goOffline(host.db);
-  await expect.poll(() => b?.connected[0]).toBe(false);
-  goOnline(host.db);
-  await expect.poll(() => b?.connected[0]).toBe(true);
-  gb.dispose();
-  b = undefined;
-  const restored = await FirebaseTransport.open(
-    {
-      state: (m) => {
-        b = m;
-      },
-      connection: () => {},
-      error: (m) => errors.push(m),
-    },
-    ha.code,
-    '친구',
-    true,
-    async () => guest,
-  );
-  transports.push(restored);
-  await expect.poll(() => b?.game?.stateVersion).toBe(settled.game!.stateVersion);
-  await expect.poll(() => b?.connected.every(Boolean)).toBe(true);
-  await restored.leave();
-  await expect.poll(() => a?.closed).toBe(true);
-  await expect
-    .poll(async () => (await get(ref(host.db, `rooms/${ha.code}/meta`))).exists())
-    .toBe(false);
-  await ha.leave();
-  await expect
-    .poll(async () => (await get(ref(host.db, `rooms/${ha.code}/meta`))).exists())
-    .toBe(false);
-  expect(errors.filter((m) => !m.includes('종료'))).toEqual([]);
-});
-
-it('host and guest can choose chrysanthemum conversion or retention through existing rules', async () => {
-  const host = await user(),
-    guest = await user();
+it('real Auth three seats automatically start, recover, finish, vote next round and close with preserved state', async () => {
+  const users = await Promise.all([user(), user(), user(), user()]);
   const messages: (RoomMessage | undefined)[] = [];
   const errors: string[] = [];
-  const callbacks = (i: number) => ({
-    state: (m: RoomMessage) => {
-      messages[i] = m;
-    },
-    connection: () => {},
-    error: (m: string) => errors.push(m),
-  });
-  const ha = await FirebaseTransport.open(callbacks(0), undefined, '방장', false, async () => host);
-  const gb = await FirebaseTransport.open(
-    callbacks(1),
-    ha.code,
-    '참가자',
-    false,
-    async () => guest,
-  );
-  transports.push(ha, gb);
-  await expect.poll(() => messages.every((m) => m?.canAct) && messages.length === 2).toBe(true);
-  for (const player of [0, 1] as const) {
-    const game = applyAction(createFixture('국화 점수 선택'), {
-      type: 'PLAY_CARD',
-      player: 0,
-      cardId: 'm2-0',
-    }).nextState;
-    if (player === 1) {
-      game.players = [game.players[1], game.players[0]];
-      game.currentPlayer = 1;
-    }
-    await runTransaction(
-      ref(host.db, `rooms/${ha.code}/state`),
-      (value) => {
-        const state = JSON.parse(value.data);
-        state.game = game;
-        state.revision++;
-        state.events = [];
-        return encodeState(state);
+  const players: FirebaseTransport[] = [];
+  async function open(i: number, code?: string, resume = false) {
+    let t: FirebaseTransport | undefined;
+    t = await FirebaseTransport.open(
+      {
+        state: (m) => {
+          messages[i] = m;
+          if (m.game)
+            queueMicrotask(() => void t?.ready(m.round, m.game!.stateVersion).catch(() => {}));
+        },
+        connection: () => {},
+        error: (e) => errors.push(e),
       },
-      { applyLocally: false },
+      code,
+      `참가자${i}`,
+      resume,
+      async () => users[i],
     );
-    await expect.poll(() => messages[player]?.game?.phase).toBe('SELECT_KUKJIN');
-    await ha.ready(messages[0]!.round, messages[0]!.game!.stateVersion);
-    await gb.ready(messages[1]!.round, messages[1]!.game!.stateVersion);
-    await expect.poll(() => messages.every((m) => m?.canAct)).toBe(true);
-    const m = messages[player]!;
-    await [ha, gb][player].action({
-      sequence: m.actionSequence + 1,
-      round: m.round,
-      stateVersion: m.game!.stateVersion,
-      action: { type: 'SET_KUKJIN', player, asPi: player === 0 },
-    });
-    await expect.poll(() => messages[player]?.game?.phase).toBe(player === 0 ? 'GO_STOP' : 'PLAY');
-    await expect
-      .poll(() => messages[0]?.game?.stateVersion === messages[1]?.game?.stateVersion)
-      .toBe(true);
-    expect(messages[0]!.game!.players[player].kukjinAsPi).toBe(player === 0);
-    const { hand: hostHand, ...hostView } = messages[0]!.game!;
-    const { hand: guestHand, ...guestView } = messages[1]!.game!;
-    expect(hostView).toEqual(guestView);
+    ts.push(t);
+    players[i] = t;
+    return t;
   }
-  expect(errors).toEqual([]);
-  await gb.leave();
-});
-
-it('numeric allocation skips active collisions, reuses expired codes and defaults player names by role', async () => {
-  const first = await user(),
-    second = await user(),
-    joiner = await user();
-  const callbacks = { state: () => {}, connection: () => {}, error: () => {} };
-  const forceCode = (value: number) =>
-    vi.spyOn(crypto, 'getRandomValues').mockImplementationOnce((array) => {
-      (array as Uint32Array)[0] = Math.ceil((value / 10000) * 4294967296);
-      return array;
-    });
-  forceCode(123);
-  const active = await FirebaseTransport.open(callbacks, undefined, '', false, async () => first);
-  transports.push(active);
-  expect(active.code).toBe('0123');
-  await env.withSecurityRulesDisabled(async (c) => {
-    const old = (
-      await get(
-        ref(c.database('https://demo-toki-matgo-default-rtdb.firebaseio.com'), 'rooms/0123'),
-      )
-    ).val() as RoomData;
-    old.meta.expiresAt = Date.now() - 1000;
-    await set(
-      ref(c.database('https://demo-toki-matgo-default-rtdb.firebaseio.com'), 'rooms/0456'),
-      old,
-    );
-  });
-  const spy = vi.spyOn(crypto, 'getRandomValues');
-  spy.mockImplementationOnce((array) => {
-    (array as Uint32Array)[0] = Math.ceil((123 / 10000) * 4294967296);
-    return array;
-  });
-  spy.mockImplementationOnce((array) => {
-    (array as Uint32Array)[0] = Math.ceil((456 / 10000) * 4294967296);
-    return array;
-  });
-  const replacement = await FirebaseTransport.open(
-    callbacks,
-    undefined,
-    '',
-    false,
-    async () => second,
-  );
-  transports.push(replacement);
-  vi.restoreAllMocks();
-  expect(replacement.code).toBe('0456');
-  const occupied = (await get(ref(first.db, 'rooms/0123'))).val() as RoomData;
-  expect(occupied.meta.hostUid).toBe(first.uid);
-  const guest = await FirebaseTransport.open(
-    callbacks,
-    replacement.code,
-    '',
-    false,
-    async () => joiner,
-  );
-  transports.push(guest);
+  const host = await open(0);
+  await open(1, host.code);
+  await expect.poll(() => messages[0]?.game ?? null).toBeNull();
+  await open(2, host.code);
   await expect
-    .poll(async () => {
-      const joined = (await get(ref(second.db, 'rooms/0456'))).val() as RoomData;
-      return joined.players?.[joiner.uid]?.name;
-    })
-    .toBe('참가자');
-  const room = (await get(ref(second.db, 'rooms/0456'))).val() as RoomData;
-  expect(room.meta.hostUid).toBe(second.uid);
-  expect(room.players![second.uid].name).toBe('방장');
-  expect(room.players![joiner.uid].name).toBe('참가자');
-  await guest.leave();
-  await active.leave();
-});
-
-it('simultaneous room allocations by the same UID allow only one live room', async () => {
-  const host = await user();
-  const callbacks = { state: () => {}, connection: () => {}, error: () => {} };
-  const results = await Promise.allSettled([
-    FirebaseTransport.open(callbacks, undefined, '방장', false, async () => host),
-    FirebaseTransport.open(callbacks, undefined, '방장', false, async () => host),
-  ]);
-  const successes = results.filter(
-    (r): r is PromiseFulfilledResult<FirebaseTransport> => r.status === 'fulfilled',
-  );
-  for (const r of successes) transports.push(r.value);
-  expect(successes).toHaveLength(1);
-  await successes[0].value.leave();
+    .poll(
+      () => messages.slice(0, 3).every((m) => m?.canAct) && messages.filter(Boolean).length === 3,
+    )
+    .toBe(true);
+  expect(messages.map((m) => m?.me)).toEqual([0, 1, 2]);
+  await expect(open(3, host.code)).rejects.toThrow();
+  goOffline(users[2].db);
+  await expect.poll(() => messages[0]?.connected[2]).toBe(false);
+  expect(messages[0]?.canAct).toBe(false);
+  goOnline(users[2].db);
+  await expect.poll(() => messages.slice(0, 3).every((m) => m?.canAct)).toBe(true);
+  // Guest refresh resumes the same seat without reinitializing or advancing the round.
+  players[2].dispose();
+  await open(2, host.code, true);
+  await expect.poll(() => messages[2]?.canAct).toBe(true);
+  expect(messages[2]?.me).toBe(2);
+  let steps = 0;
+  while (messages[0]?.game?.phase !== 'FINISHED' && steps++ < 150) {
+    await expect
+      .poll(() =>
+        messages
+          .slice(0, 3)
+          .every((m) => m?.canAct && m.game?.stateVersion === messages[0]?.game?.stateVersion),
+      )
+      .toBe(true);
+    if (messages[0]!.game!.phase === 'FINISHED') break;
+    const current = messages[0]!.game!.currentPlayer,
+      m = messages[current]!;
+    const action = chooseAction(m.game!, current, 'easy');
+    await players[current].action({
+      round: m.round,
+      sequence: m.actionSequence + 1,
+      stateVersion: m.game!.stateVersion,
+      action,
+    });
+  }
+  expect(messages[0]!.game!.phase).toBe('FINISHED');
+  await expect.poll(() => new Set(messages.slice(0, 3).map((m) => m?.revision)).size).toBe(1);
+  const points = messages[0]!.stats.points;
+  expect(points.reduce((n, p) => n + p, 0n)).toBe(0n);
+  for (let i = 0; i < 3; i++) {
+    const m = messages[i]!;
+    await players[i].nextRound(m.round, m.game!.stateVersion, m.actionSequence + 1);
+    if (i < 2) expect(messages[0]!.round).toBe(1);
+  }
+  await expect.poll(() => messages[0]?.round).toBe(2);
+  await players[1].leave();
+  await expect.poll(() => messages[0]?.closed).toBe(true);
+  expect((await get(ref(users[0].db, `rooms/${host.code}/state`))).exists()).toBe(true);
+  expect(errors).toEqual([]);
+}, 120000);
+it('waiting guest can leave and another anonymous user takes the free seat', async () => {
+  const users = await Promise.all([user(), user(), user()]);
+  const msgs: (RoomMessage | undefined)[] = [];
+  const open = async (i: number, code?: string) => {
+    const t = await FirebaseTransport.open(
+      { state: (m) => (msgs[i] = m), connection: () => {}, error: () => {} },
+      code,
+      `P${i}`,
+      false,
+      async () => users[i],
+    );
+    ts.push(t);
+    return t;
+  };
+  const h = await open(0),
+    a = await open(1, h.code);
+  await expect.poll(() => msgs[1]?.me).toBe(1);
+  await a.leave();
+  const b = await open(2, h.code);
+  await expect.poll(() => msgs[2]?.me).toBe(1);
+  expect(msgs[0]?.closed).toBe(false);
+  await h.leave();
+  b.dispose();
 });

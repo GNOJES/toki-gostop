@@ -1,24 +1,46 @@
-import type { GameAction, GameEvent, GameState, GameView, PlayerId } from '../game-engine/types';
+import type {
+  GameAction,
+  GameEvent,
+  GameState,
+  GameView,
+  SeatId,
+  SeatTuple,
+  PointTransfer,
+  Points,
+} from '../game-engine/types';
 export interface Stats {
-  wins: [number, number];
-  points: [number, number];
+  wins: SeatTuple<number>;
+  points: SeatTuple<Points>;
+}
+export interface RoomMeta {
+  hostUid: string;
+  seats: { '0': string; '1'?: string; '2'?: string };
+  rosterVersion: number;
+  status: 'waiting' | 'active' | 'closed';
+  roomId: string;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number;
 }
 export interface RoomMessage {
   code: string;
-  me: PlayerId;
+  roomId: string;
+  me: SeatId;
   nickname: string;
-  names: [string, string];
-  connected: [boolean, boolean];
+  names: SeatTuple<string>;
+  connected: SeatTuple<boolean>;
   round: number;
   stats: Stats;
-  nextReady: [boolean, boolean];
+  nextReady: SeatTuple<boolean>;
   actionSequence: number;
   canAct: boolean;
   game: GameView | null;
   events: GameEvent[];
+  transactions: PointTransfer[];
   revision: number;
   closed: boolean;
   expiresAt: number;
+  disconnectedSince: number | null;
 }
 export interface Envelope {
   round: number;
@@ -36,10 +58,11 @@ export interface HostState {
   game: GameState | null;
   events: GameEvent[];
   stats: Stats;
-  processed: [number, number];
-  nextReady: [boolean, boolean];
-  receipts: [{ seq: number; error?: string }, { seq: number; error?: string }];
-  settledVersion: number | null;
+  processed: SeatTuple<number>;
+  nextReady: SeatTuple<boolean>;
+  receipts: SeatTuple<{ seq: number; error?: string }>;
+  appliedTransferIds: string[];
+  settledGameId: string | null;
 }
 export interface PlayerRecord {
   name: string;
@@ -47,14 +70,7 @@ export interface PlayerRecord {
   ready?: { round: number; version: number };
 }
 export interface RoomData {
-  meta: {
-    hostUid: string;
-    guestUid?: string;
-    createdAt: number;
-    expiresAt: number;
-    status: 'waiting' | 'active' | 'closed';
-    updatedAt: number;
-  };
+  meta: RoomMeta;
   players?: Record<string, PlayerRecord>;
   state: { version: number; data: string };
   actions?: Record<string, Record<string, Request>>;

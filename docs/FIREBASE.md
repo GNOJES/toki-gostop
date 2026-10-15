@@ -1,135 +1,39 @@
-# Firebase 운영 안내
+# 토끼고스톱 Firebase 운영
 
-## 현재 프로젝트
+토끼맞고와 별도의 Firebase 프로젝트·Realtime Database·익명 인증을 사용한다. 실제 고스톱 리소스 ID와 운영 주소는 새 프로젝트 연결 단계에서 기록한다. 기존 맞고 설정으로 운영하거나 테스트하지 않는다.
 
-- Project ID: `toki-matgo`
-- Auth domain: `toki-matgo.firebaseapp.com`
-- RTDB: `https://toki-matgo-default-rtdb.asia-southeast1.firebasedatabase.app`
-- Anonymous Authentication: 사용자 활성화 완료
-- 기존 Rules는 게시 완료. 이번 변경의 새 Rules를 프런트엔드 배포 전에 다시 게시해야 함
-- 로컬 `.env.local`: 제공받은 7개 web config 값으로 구성, Git 제외
-- Vercel 등록 값: [README의 환경변수 블록](../README.md#vercel-환경변수와-배포)
+## 로컬 검증
 
-아직 이 저장소 작업으로 운영 Firebase Rules를 변경하거나 Vercel에 환경변수를 등록하지 않았다. 에뮬레이터 검증과 운영 Console 설정은 별개다.
+Java 21 이상, 기존 npm lockfile 설치 환경을 사용한다. `npm run test:firebase`는 `demo-toki-gostop`에서 Auth 9199·Database 9100 포트를 사용하고 종료 시 에뮬레이터를 정리한다. 개발은 `npm run emulators`와 `npm run dev:firebase`를 사용한다. 일반 개발 서버가 복제된 맞고 설정을 읽으면 친구방 연결을 거절한다.
 
-## 최종 Security Rules 적용
+## 데이터와 권한
 
-**최종 원본은 [database.rules.json](../database.rules.json)이다.** 파일 전체를 복사해 Firebase Console → `toki-matgo` → Build → Realtime Database → Rules에 붙여넣고 Publish한다. 일부 노드만 붙이거나 기본 잠금 Rules와 합치지 않는다. 파일에는 최상위 `rules` 객체도 포함되어 있다.
+- `rooms/{4자리 코드}/meta`: hostUid, roomId, seats(0/1/2 UID), rosterVersion, waiting/active/closed, 고정 생성·만료 시각.
+- `players/{uid}`: 별명, 세션별 connections, 현재 round/version 연출 완료.
+- `state`: revision과 JSON data. BigInt 점수는 10진 문자열로 저장한다.
+- `actions/{uid}/pending`: 순번이 증가하는 행동 1개. 판 번호와 게임 버전 포함.
+- `roomOwners/{uid}`: 한 UID의 활성 생성 방과 예약·쿨다운을 보호한다.
 
-CLI를 사용하는 경우에도 동일 파일을 적용할 수 있다.
+메타의 최소 참가 정보만 인증 사용자에게 공개한다. 기존 참가자만 방 전체를 읽고 방장만 최종 상태를 쓴다. 각 참가자는 자기 이름·연결·완료 신호·행동만 쓴다. 좌석 집합의 트랜잭션으로 동시에 참가해도 세 자리와 UID 유일성을 유지한다. active 이후 좌석은 고정하며, closed에서 다시 active로 바꿀 수 없다.
 
-```sh
-npx firebase login
-npx firebase deploy --only database --project toki-matgo
-```
+세 명의 이름과 연결이 확보되면 방장이 메타를 active로 전환하고 첫 게임을 한 번만 생성한다. 중간에 방장이 재시작해도 같은 roomId/round의 생성이 재개된다. 이후 매 행동은 세 명 연결·현재 연출 완료와 순번·판·버전을 확인한다. 클라이언트가 보낸 자리 번호는 UID 기반 자리로 대체한다.
 
-CLI 로그인/배포는 사용자가 실행하는 운영 변경이다. 에뮬레이터용 demo 프로젝트 ID로 운영 배포하지 않는다. 적용 후 사이트의 서로 다른 브라우저에서 방 생성/참가를 확인한다. `permission_denied`가 나면 Rules가 해당 RTDB 인스턴스에 Publish됐는지, 익명 인증이 활성화됐는지, 배포 빌드에 URL/projectId가 맞는지 확인한다.
+참가자는 DB의 전체 손패와 미래 덱을 읽을 수 있다. 이 앱은 신뢰하는 가족·친구용이며 공개 경쟁용 비밀 상태·부정행위 방지 서버를 제공하지 않는다.
 
-Rules의 범위:
+## 복구와 정산
 
-| 경로                  | 읽기                         | 쓰기                                                                        |
-| --------------------- | ---------------------------- | --------------------------------------------------------------------------- |
-| `/rooms` 목록         | 금지                         | 금지                                                                        |
-| `/rooms/{code}`       | 방장/게스트만 전체 조회      | 새 방 생성자만 생성, 참가자만 종료 방 삭제; 만료 방은 인증 사용자 삭제 허용 |
-| `meta`                | 코드를 아는 익명 인증 사용자 | 참가자만 제한된 갱신; guestUid 최초 점유는 자신의 UID로 한 번만             |
-| `players/{uid}`       | 참가자                       | 자기 이름/presence/ready만                                                  |
-| `state`               | 참가자                       | 방장만, version 1씩 증가, 문자열 크기 제한                                  |
-| `actions/{uid}/{seq}` | 참가자                       | 자기 action 최초 작성만, 변경 금지; 처리 후 삭제는 방장만                   |
+같은 익명 UID는 같은 자리로 복귀한다. 어느 한 명이라도 끊기면 판정을 멈추고, 복귀 시 과거 연출을 건너뛰어 최신 상태로 맞춘다. 2분 후 남은 사람이 방 종료를 선택할 수 있다. 자동 패배·방장 교체·AI 대체는 없다.
 
-비인증 사용자는 모든 rooms 접근이 차단된다. 방 코드 확인과 참가 트랜잭션을 위해 **최소 meta는 코드가 있는 익명 사용자에게 읽기를 허용**한다. 이를 통해 참가 전에도 방 없음/만료/정원 오류를 안내한다. 게임 상태·행동·플레이어 정보와 전체 방 목록을 제3자에게 공개하지 않는다. `guestUid`는 원자 트랜잭션으로 선점하므로 두 사람이 동시에 참가해도 한 명만 성공한다. 게스트가 자신을 제거하고 세 번째 사람으로 바꾸는 것도 막는다.
+즉시 거래는 각 행동 커밋과 함께 통계에 한 번만 반영한다. 종료 거래와 승수도 게임 ID로 한 번만 반영한다. 다음 판은 세 명 모두 동의해야 시작하며, 연속 나가리 횟수를 전달한다.
 
-Rules는 게임 규칙 자체를 계산하지 않는다. 방장이 저장한 JSON의 게임 내용은 신뢰하며 기존 엔진이 턴/phase/카드 소유권과 유효한 선택을 판정한다. 개발자 도구 접근 및 악의적인 방장 조작은 이 버전의 허용된 한계다.
+시작 전 게스트의 나가기는 빈 자리를 반환한다. 방장 또는 시작 후 참가자가 나가면 closed로 바꾸고 마지막 상태를 보존한다. 판 미완료 기권 정산은 하지 않는다. 이미 확정된 즉시 거래는 브라우저 저널에 보존한다. 방은 생성 후 24시간 만료이며 재분배·활동으로 연장하지 않는다. 종료 상태는 즉시 삭제하지 않고, 만료 후 생성자가 새 방을 만들 때 알려진 과거 방을 정리한다. 코드 재사용 시 roomId를 확인하여 옛 방 복구를 새 참가로 처리하지 않는다.
 
-새 버전을 쓰기 전에 `database.rules.json`을 다시 게시한다. 이전 6자리 방은 기존 참가자의 복귀를 위해 재접속을 유지하지만 새 생성은 숫자 4자리만 허용한다.
+## 운영 연결 순서
 
-## 데이터 구조와 판정 흐름
+1. 전용 프로젝트에서 익명 인증과 잠금 모드 RTDB를 준비한다.
+2. `.env.example`의 Firebase 공개 설정과 승인된 `FIREBASE_EXPECTED_PROJECT_ID`를 맞춘다. 서비스 계정 키는 앱에 넣지 않는다.
+3. 에뮬레이터 검증을 통과한 `database.rules.json`을 게시한다.
+4. 전용 Vercel 프로젝트에 설정·운영 origin·전용 GA ID를 등록하고 새 빌드를 배포한다.
+5. 실제 세 브라우저/기기에서 방 입장·판 종료·재접속·다음 판·독립 DB 쓰기를 확인한다.
 
-```text
-roomOwners/{uid}: code, createdAt, expiresAt
-rooms/{숫자 4자리 코드}
-  meta: hostUid, guestUid?, status, createdAt, updatedAt, expiresAt
-  players/{uid}
-    name
-    connections/{브라우저 세션 UUID}: true
-    ready: {round, version}
-  actions/{uid}/pending
-    uid, sequence, round, stateVersion, action, createdAt
-  state
-    version: host revision
-    data: JSON 문자열(전체 HostState)
-```
-
-`state.data`는 GameState, events, round, 승수/점수, 처리한 각 UID의 순번, 행동 처리 결과, 다음 판 준비를 함께 저장한다. RTDB에서 빈 배열과 null이 변형되는 문제를 피하기 위해 JSON 문자열을 사용한다. `state.version`은 잘못된 요청의 처리 결과를 포함한 revision이고, 엔진 `game.stateVersion`은 실제 게임 행동 버전이다. 두 값은 목적이 다르다.
-
-Host/Guest 모두 같은 경로에 action을 기록한다. Host가 순차 수신 후 state 트랜잭션에서 기존 `applyAction`을 실행한다. UID로 player를 결정해 클라이언트의 player 주장을 덮어쓴다. 이미 처리한 sequence는 다시 실행하지 않는다. 순번 누락, 다른 판/오래된 버전, 차례 위반, 준비 전 행동은 게임 상태를 변경하지 않고 오류 receipt를 기록한다. 각 플레이어의 sequence는 다음 판에도 이어진다.
-
-실제 action 타입은 기존 엔진의 `PLAY_CARD`(흔들기 선택 포함), `SELECT_FLOOR`, `BOMB`, `PASS`, `GO`, `STOP`, `SET_KUKJIN`과 transport의 `NEXT_ROUND`이다. 별도의 Firebase 게임 규칙은 없다.
-
-첫 참가 후 셔플/분배는 Host만 한다. 다음 판도 두 명의 NEXT_ROUND 준비가 확인된 뒤 Host가 한 번 생성한다. 승수/점수 정산과 상태 생성이 같은 트랜잭션 안에서 처리된다. Guest는 별도 셔플이나 최종 state 작성을 하지 않는다.
-
-두 화면은 동일 authoritative state를 각각 `projectState`로 렌더링한다. 상대 손패는 UI에서 장수만 표시하지만 전체 원본은 참가자 DB 조회에 포함된다. 각 화면의 이벤트 연출 종료 후 ready를 기록하고, 양쪽의 같은 판/버전 ready가 모여야 다음 패를 낼 수 있다. 재로딩에서는 지나간 이벤트를 다시 연출하지 않고 최신 상태로 복원한다.
-
-## 로컬 테스트
-
-단일 플레이는 Firebase 없이 `npm run dev`만 실행한다. 실제 Firebase와 연결하려면 `.env.local` 설정 + Console Rules가 필요하다.
-
-운영 DB를 사용하지 않는 테스트:
-
-```sh
-npm ci
-# Java 21 이상 설치 및 JAVA_HOME/PATH 설정
-npx playwright install chromium webkit
-npm run test:firebase
-npm run test:e2e
-```
-
-자동 실행 명령은 로컬 에뮬레이터를 시작하고 종료한다. Auth/RTDB는 각각 9099/9000, E2E Next는 3004이다. `demo-toki-matgo`를 사용하고 `.env.local`보다 우선하는 demo 설정을 주입하므로 운영 프로젝트에 테스트 방을 만들지 않는다.
-
-직접 두 브라우저를 조작할 때는 `npm run emulators`와 `npm run dev:firebase`를 별도 터미널에서 실행해 localhost:3000을 연다. 일반 창 + 시크릿 창 또는 Chrome + Safari를 사용한다. 일반 탭 두 개는 같은 익명 UID를 공유한다. Emulator UI는 http://127.0.0.1:4000이다. 이 프로젝트는 에뮬레이터를 기본 127.0.0.1에 바인딩하며 LAN에 개방하지 않는다.
-
-로컬에서 실제 폰을 사용하려면 실제 Firebase 설정으로 `npm run dev`를 실행하고 PC의 LAN IP:3000으로 접속한다. `next.config.ts`의 allowedDevOrigins에도 PC IP를 추가한다. 서비스워커/홈 설치/Web Share는 HTTPS 또는 localhost가 필요하므로 최종 폰 검증은 Vercel의 HTTPS URL로 진행한다.
-
-## 실제 두 휴대폰 확인
-
-1. 두 폰에서 동일 Vercel URL 접속, 한쪽 이름 입력 후 방 만들기.
-2. 코드/초대 링크/QR 전달, 상대 폰으로 참가. 손패 10장/바닥/선/점수 일치 확인.
-3. 서로 몇 턴 진행하며 같은 월 2장 선택, 특수 패, 고/스톱, 결과를 확인.
-4. 두 명 모두 한 판 더를 눌러 다음 판이 같은 분배로 시작하는지 확인.
-5. 게스트 새로고침 → 동일 이름/자리/최신 상태로 복귀.
-6. 방장 Wi-Fi/LTE 전환 또는 잠깐 네트워크 끊기 → 게스트 연결 대기 표시, 방장 복귀 → 같은 판 계속.
-7. 짧게 화면 잠금/다른 앱 전환 후 복귀. OS가 브라우저를 장시간 정지할 경우 복귀까지 판정이 멈출 수 있다.
-8. 확대 창/설정 뒤로가기는 창만 닫힘, 게임 뒤로가기는 나가기 확인. 한 명이 명시적으로 나가면 상대에 종료 안내.
-
-## 재접속·정리·제약
-
-Firebase 익명 UID는 브라우저 로컬 인증 persistence로 유지된다. 방 코드/UID는 localStorage에 보관한다. presence는 세션별 연결 노드를 쓰며 `onDisconnect().remove()`로 해제한다. 네트워크 단절 감지는 서버 타임아웃까지 지연될 수 있다. SDK가 자동 연결 복구 후 presence를 다시 등록한다. 새로고침도 같은 UID이면 같은 참가자로 복귀한다. 브라우저 저장소 삭제/다른 브라우저/시크릿 창 종료 후 익명 계정 분실은 별도 사용자로 취급한다.
-
-Host가 끊기면 Guest는 대기하고 나갈 수 있다. 서버가 대신 게임을 진행하거나 자동으로 Host를 교체하지 않는다. 명시적 나가기와 일시 단절/새로고침은 구분한다. 명시적 나가기는 방 전체 종료·삭제, 단절은 보존이다. 양쪽 모두 상대 이름과 대기 시간을 보며 2분 후 기다림 종료 버튼을 사용할 수 있다. 종료 통지가 오면 확대/설정 창을 닫고 종료 안내를 표시하며, 미완료 판은 승패에 반영하지 않는다. 오프라인에서 명시적으로 나간 경우 상대에게 알리는 쓰기는 연결 복구 후 전달될 수 있다.
-
-방의 유효기간은 생성부터 24시간이다. 새 방 생성 시 이 브라우저가 저장한 자신의 이전 방을 모두 확인해 만료/종료 방을 제거한다. 처리 완료 action은 마지막 요청/receipt만 남기도록 정리한다. 전역 목록 조회, cron, Cloud Functions는 쓰지 않는다. 새 코드 후보가 만료된 방이면 인증 사용자가 그 방을 삭제하고 번호를 재사용한다. 활성 방은 삭제할 수 없으며 생성 트랜잭션으로 충돌을 막는다. 아무도 접속하지 않을 때 실행되는 주기적 정리는 없고, 아직 재사용되지 않은 만료 방 기록은 남을 수 있다. 전역 정리는 필요시 Console에서 수동으로 할 수 있다. 무료 구조를 유지하며 예약 함수/Blaze를 추가하지 않는다.
-
-같은 UID의 여러 탭은 하나의 참가자이고, 동일 순번 트랜잭션/처리로 중복 행동을 막는다. 두 명 테스트에는 다른 인증 저장소를 사용한다. 무제한 규모/무료 보장, 경쟁 서비스의 치팅 방지, 영구 계정 복구는 범위 밖이다. Firebase 무료 플랜의 실제 사용량은 Console에서 확인한다.
-
-기존 `server/index.ts` / `server/rooms.ts`와 Socket.IO 명령은 legacy이며 Firebase의 운영 경로에서는 실행하지 않는다. 최종 프런트에는 Node 게임 서버 import/URL 연결이 없다.
-
-참고: [익명 인증](https://firebase.google.com/docs/auth/web/anonymous-auth), [인증 persistence](https://firebase.google.com/docs/auth/web/auth-state-persistence), [RTDB 트랜잭션](https://firebase.google.com/docs/database/web/read-and-write), [presence / onDisconnect](https://firebase.google.com/docs/database/web/offline-capabilities), [Security Rules](https://firebase.google.com/docs/database/security), [Emulator 테스트](https://firebase.google.com/docs/rules/unit-tests).
-
-## 2026-10-04 출시 전 개선 버전 적용 순서
-
-1. 진행 중인 친구 게임을 끝낸다. 새 Rules는 이전 클라이언트의 숫자 키 행동 쓰기를 차단하므로 운영 중 무중단 호환 배포는 지원하지 않는다.
-2. 이 브랜치의 `database.rules.json` **전체**를 Firebase Console에 게시한다. `roomOwners` 노드를 포함해야 한다.
-3. GitHub `Release checks / release-checks` 통과를 확인하고 프런트엔드를 배포한다. Vercel 환경변수 7개는 기존 값을 유지한다.
-4. 두 기기 모두 새로고침 후 **새 방**에서 시작한다. 코드 생성, 참가, 패 내기, 뒤로가기, 연결 복구를 확인한다.
-5. 롤백 시에는 이전 프런트엔드와 이전 Rules를 한 쌍으로 되돌린다. 운영 데이터를 삭제해 롤백하지 않는다.
-
-변경 후 UID당 동시에 소유할 수 있는 활성 방은 1개이며 예약 생성 간격은 10초다. 중복 방 예약은 Rules가 거절한다. 예약 직후 드문 방 번호 충돌이 나면 10초 후 다시 시도한다. 만료 시간은 기존과 동일하게 24시간이며 신규 생성 시 만료 방을 정리·재사용한다. `roomOwners`의 마지막 예약은 삭제를 금지해 삭제 후 간격 제한 우회를 막는다. UID마다 작은 레코드 하나가 남는다. 기존 버전에서 이미 만든 방에는 인덱스가 없으므로 위의 새 방 시작 절차가 필요하다.
-
-요청은 `actions/{uid}/pending`에 참가자당 최대 한 건 저장한다. 동일 순번은 불변이고 다음 순번으로 교체한다. Rules는 정수 범위, 카드 ID, 행동별 필드, 미지정 필드를 검사한다. 기존 잘못된 큐 항목은 방장이 격리·삭제하고 정상 항목 처리를 계속한다. 통신 제한 시간이 지나도 SDK의 이미 전송 중인 쓰기가 나중에 완료될 수 있으므로 재시도는 같은 순번을 사용하며 엔진은 중복 적용하지 않는다.
-
-4자리 코드를 아는 사람의 참가와 방장 신뢰 모델은 제품의 합의된 범위로 유지했다. 새 익명 UID를 대량 발급하는 공격을 계정당 방 제한만으로 막을 수는 없다. 무료 구조에서 전역 가입/전송 횟수 제한까지 보장하는 구현은 아니다.
-
-## 기록과 오프라인 업데이트
-
-누적 기록은 IndexedDB `toki-history-v2`의 트랜잭션으로 저장하며 기존 localStorage 기록은 최초 한 번 이관한다. localStorage는 호환 캐시·다른 탭 갱신 신호로만 쓴다. 브라우저 사이트 데이터 삭제 시 기록도 삭제된다.
-
-프로덕션 빌드의 `build-offline-shell.mjs`는 HTML과 정확한 JS/CSS/폰트 목록을 생성한다. 서비스워커는 이 묶음 전체가 다운로드된 후에만 교체된다. 현재·직전 캐시와 열린 이전 게임 탭에 필요한 캐시만 보존한다. 열린 탭의 응답을 아직 받지 못했다면 삭제를 보류하며, 탭이 버전 정보를 다시 보내면 정리한다. 업데이트 시 게임을 강제 새로고침하지 않는다.
+운영 빌드는 원본 matgo ID와 승인 ID 불일치·에뮬레이터 사용을 거절한다. 로컬 CI demo 빌드는 명시적인 CI 컨텍스트에서만 허용하며 Vercel에서는 그 우회를 사용하지 않는다.

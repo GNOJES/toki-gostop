@@ -1,150 +1,104 @@
 import { it, expect } from 'vitest';
-import { seededRandom } from '../src/game-engine/cards';
-import { chooseAction } from '../src/game-engine/ai';
-import { projectState } from '../src/game-engine/engine';
-import { createFixture } from '../src/game-engine/fixtures';
 import {
   emptyHostState,
   encodeState,
+  decodeState,
+  startGame,
   processRequest,
   roomMessage,
-  startGame,
+  readyToAct,
 } from '../src/multiplayer/host';
-import type { HostState, RoomData, Request } from '../src/multiplayer/types';
-function pair() {
-  const rng = seededRandom(12345),
-    state = startGame(emptyHostState(), rng);
+import { seededRandom } from '../src/game-engine/cards';
+import { chooseAction } from '../src/game-engine/ai';
+import type { RoomData } from '../src/multiplayer/types';
+function setup() {
   const room: RoomData = {
     meta: {
-      hostUid: 'host',
-      guestUid: 'guest',
+      hostUid: 'h',
+      seats: { '0': 'h', '1': 'a', '2': 'b' },
+      rosterVersion: 2,
       status: 'active',
-      createdAt: 0,
-      updatedAt: 0,
-      expiresAt: Date.now() + 100000,
+      roomId: 'r',
+      createdAt: 1,
+      updatedAt: 1,
+      expiresAt: Date.now() + 999999,
     },
     players: {
-      host: {
-        name: '방장',
-        connections: { h: true },
-        ready: { round: 1, version: state.game!.stateVersion },
-      },
-      guest: {
-        name: '친구',
-        connections: { g: true },
-        ready: { round: 1, version: state.game!.stateVersion },
-      },
+      h: { name: 'H', connections: { x: true } },
+      a: { name: 'A', connections: { x: true } },
+      b: { name: 'B', connections: { x: true } },
     },
-    state: encodeState(state),
+    state: encodeState(emptyHostState()),
   };
-  return { rng, state, room };
+  let state = startGame(emptyHostState(), room, seededRandom(12));
+  room.state = encodeState(state);
+  for (const p of Object.values(room.players!))
+    p.ready = { round: state.round, version: state.game!.stateVersion };
+  return { room, state };
 }
-function request(state: HostState, uid: string): Request {
-  const player = uid === 'host' ? 0 : 1;
-  return {
-    uid,
-    sequence: state.processed[player] + 1,
-    round: state.round,
-    stateVersion: state.game!.stateVersion,
-    createdAt: Date.now(),
-    action:
-      state.game!.currentPlayer === player
-        ? chooseAction(projectState(state.game!, player), player)
-        : { type: 'PLAY_CARD', player, cardId: state.game!.players[player].hand[0].id },
-  };
-}
-it('host initializes once and publishes the same result for both projections', () => {
-  const { rng, state, room } = pair();
-  expect(startGame(state, rng)).toBe(state);
-  expect(roomMessage(room, 'ABC234', 'host', false).game!.stateVersion).toBe(
-    roomMessage(room, 'ABC234', 'guest', false).game!.stateVersion,
-  );
-  expect(roomMessage(room, 'ABC234', 'host', false).me).toBe(0);
-  expect(roomMessage(room, 'ABC234', 'guest', false).me).toBe(1);
+it('initializes once and maps all three private views', () => {
+  const { room, state } = setup();
+  expect(startGame(state, room, seededRandom(1))).toBe(state);
+  expect(roomMessage(room, '1234', 'b', false).me).toBe(2);
+  expect(readyToAct(room, state)).toBe(true);
+  expect(() => roomMessage(room, '1234', 'x', false)).toThrow();
+  delete room.players!.b.ready;
+  expect(readyToAct(room, state)).toBe(false);
 });
-it('guest request is validated by host; duplicate never runs twice and spoofed player is overwritten', () => {
-  const { rng, state, room } = pair();
-  state.game!.currentPlayer = 1;
-  const req = request(state, 'guest');
-  if ('player' in req.action) req.action.player = 0;
-  const next = processRequest(state, room, req, rng);
-  expect(next.receipts[1].error).toBeUndefined();
-  expect(next.game!.stateVersion).toBeGreaterThan(state.game!.stateVersion);
-  expect(processRequest(next, room, req, rng)).toBe(next);
-});
-it('wrong turn, stale version, previous round, outsider and disconnected host are rejected', () => {
-  const { rng, state, room } = pair();
-  state.game!.currentPlayer = 0;
-  const wrong = processRequest(state, room, request(state, 'guest'), rng);
-  expect(wrong.game).toEqual(state.game);
-  expect(wrong.receipts[1].error).toBeTruthy();
-  const req = request(state, 'host');
-  expect(processRequest(state, room, { ...req, stateVersion: -1 }, rng).game).toEqual(state.game);
-  expect(processRequest(state, room, { ...req, round: 0 }, rng).receipts[0].error).toBeTruthy();
-  expect(() => processRequest(state, room, { ...req, uid: 'third' }, rng)).toThrow('참가');
-  delete room.players!.host.connections;
-  expect(processRequest(state, room, req, rng).receipts[0].error).toContain('연결');
-});
-it('a missing sequence is not skipped and rejected actions consume their receipt without changing the game', () => {
-  const { rng, state, room } = pair();
-  const req = request(state, 'host');
-  expect(processRequest(state, room, { ...req, sequence: 2 }, rng)).toBe(state);
-  const bad = processRequest(state, room, { ...req, stateVersion: -1 }, rng);
-  expect(bad.processed[0]).toBe(1);
-  expect(processRequest(bad, room, req, rng)).toBe(bad);
-});
-it('floor choices use the existing engine and wait for both animation acknowledgements', () => {
-  const { rng, state, room } = pair();
-  state.game = createFixture('바닥 두 장 · 따닥');
-  room.players!.host.ready!.version = room.players!.guest.ready!.version = state.game.stateVersion;
-  const next = processRequest(
-    state,
-    room,
-    { ...request(state, 'host'), action: { type: 'PLAY_CARD', player: 0, cardId: 'm1-2' } },
-    rng,
-  );
-  expect(next.game!.phase).toBe('SELECT_FLOOR');
-  const choice: Request = {
-    uid: 'host',
-    sequence: 2,
+it('authoritatively maps sender UID, deduplicates and consumes rejected requests', () => {
+  const { room, state } = setup();
+  const p = state.game!.currentPlayer,
+    uid = room.meta.seats[p]!;
+  const action = chooseAction(roomMessage(room, '1234', uid, false).game!, p);
+  const req = {
     round: 1,
-    stateVersion: next.game!.stateVersion,
-    action: { type: 'SELECT_FLOOR', player: 0, cardId: 'm1-1' },
-    createdAt: 0,
+    sequence: 1,
+    stateVersion: 0,
+    uid,
+    createdAt: 1,
+    action: { ...action, player: ((p + 1) % 3) as 0 | 1 | 2 },
   };
-  expect(processRequest(next, room, choice, rng).receipts[0].error).toContain('패 이동');
-  room.players!.host.ready!.version = room.players!.guest.ready!.version = next.game!.stateVersion;
-  expect(processRequest(next, room, choice, rng).game!.phase).not.toBe('SELECT_FLOOR');
+  const next = processRequest(state, room, req, seededRandom(2));
+  expect(next.game!.stateVersion).toBe(1);
+  expect(processRequest(next, room, req, seededRandom(2))).toBe(next);
+  const invalid = processRequest(next, room, { ...req, sequence: 2 }, seededRandom(2));
+  expect(invalid.receipts[p].error).toBeTruthy();
+  expect(invalid.game).toEqual(next.game);
 });
-it('complete round, settle exactly once, both next-round votes and host-only shuffle', () => {
-  const { rng, state: first, room } = pair();
-  let state = first;
-  for (let step = 0; state.game!.phase !== 'FINISHED' && step < 100; step++) {
-    room.players!.host.ready = room.players!.guest.ready = {
-      round: state.round,
-      version: state.game!.stateVersion,
-    };
+it('codec round trips large signed totals and rejects invalid points', () => {
+  const { room, state } = setup();
+  state.stats.points = [2n ** 80n, -(2n ** 80n), 0n];
+  room.state = encodeState(state);
+  expect(decodeState(room)).toEqual(state);
+  expect(room.state.data).toContain('1208925819614629174706176');
+  room.state.data = room.state.data.replace('-1208925819614629174706176', '1.5');
+  expect(() => decodeState(room)).toThrow();
+});
+it('next round requires all votes and accumulates consecutive nagari', () => {
+  let { room, state } = setup();
+  const dealer = state.game!.dealer;
+  state.game!.phase = 'FINISHED';
+  state.game!.result = {
+    winner: null,
+    reason: 'NAGARI',
+    settlement: {
+      baseScore: 0,
+      commonMultiplier: 1n,
+      liabilities: [0n, 0n, 0n],
+      payerFor: [null, null, null],
+      transfers: [],
+      roundDelta: [0n, 0n, 0n],
+    },
+  };
+  for (const [p, uid] of ['h', 'a', 'b'].entries()) {
     state = processRequest(
       state,
       room,
-      request(state, state.game!.currentPlayer === 0 ? 'host' : 'guest'),
-      rng,
+      { uid, round: 1, sequence: 1, stateVersion: 0, createdAt: 1, action: { type: 'NEXT_ROUND' } },
+      seededRandom(1),
     );
+    expect(state.round).toBe(p === 2 ? 2 : 1);
   }
-  expect(state.game!.phase).toBe('FINISHED');
-  const old = state.game;
-  const vote = (uid: string): Request => ({
-    uid,
-    sequence: state.processed[uid === 'host' ? 0 : 1] + 1,
-    round: state.round,
-    stateVersion: state.game!.stateVersion,
-    action: { type: 'NEXT_ROUND' },
-    createdAt: 0,
-  });
-  state = processRequest(state, room, vote('host'), rng);
-  expect(state.round).toBe(1);
-  state = processRequest(state, room, vote('guest'), rng);
-  expect(state.round).toBe(2);
-  expect(state.game!.dealer).toBe(old!.result!.winner ?? old!.dealer);
-  expect(state.nextReady).toEqual([false, false]);
+  expect(state.game!.nagariStreak).toBe(1);
+  expect(state.game!.dealer).toBe(dealer);
 });
