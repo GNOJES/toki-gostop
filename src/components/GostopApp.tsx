@@ -23,7 +23,7 @@ import {
   type PlayHistory as History,
   type ProgressInput,
 } from '../lib/play-history';
-import { useGamePresenter } from '../lib/game-presenter';
+import { useGamePresenter, type SpecialEffect } from '../lib/game-presenter';
 import { useGameSession, useCpuTurn } from '../lib/use-game-session';
 import { PlayerPanel } from './PlayerPanel';
 import { RoomLobby } from './RoomLobby';
@@ -102,9 +102,7 @@ export function GostopApp() {
   const [impact, setImpact] = useState<{ key: number; x: number; y: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [specialEffect, setSpecialEffect] = useState<{ label: string; detail: string } | null>(
-    null,
-  );
+  const [specialEffect, setSpecialEffect] = useState<SpecialEffect | null>(null);
   const [status, setStatus] = useState('');
   const [highlight, setHighlight] = useState<string[]>([]);
   const [motion, setMotion] = useState<{
@@ -1118,7 +1116,13 @@ export function GostopApp() {
               </div>
             )}
             {busy && specialEffect && (
-              <div className="turn-message callout" role="status">
+              <div
+                className={`turn-message callout${specialEffect.player !== undefined ? ' opening-ppuk' : ''}`}
+                role="status"
+              >
+                {specialEffect.player !== undefined && (
+                  <span className="effect-player">{names[specialEffect.player]}</span>
+                )}
                 {specialEffect.label}
                 <small>{specialEffect.detail}</small>
               </div>

@@ -6,6 +6,11 @@ import { feedback, type Preferences } from './preferences';
 import type { Card as HwatuCard, GameView, GameEvent, SeatId } from '../game-engine/types';
 import type { MultiplayerTransport } from '../multiplayer/types';
 type Set<T> = Dispatch<SetStateAction<T>>;
+export interface SpecialEffect {
+  label: string;
+  detail: string;
+  player?: SeatId;
+}
 export interface Motion {
   key: number;
   cards: HwatuCard[];
@@ -37,7 +42,7 @@ interface Bindings {
   setLanding: Set<string | null>;
   setHighlight: Set<string[]>;
   setStatus: Set<string>;
-  setSpecialEffect: Set<{ label: string; detail: string } | null>;
+  setSpecialEffect: Set<SpecialEffect | null>;
   setImpact: Set<{ key: number; x: number; y: number } | null>;
   setLog: Set<GameEvent[]>;
   setError: Set<string>;
@@ -75,6 +80,26 @@ const effectDetails: Record<string, string> = {
   PPUK_OCCURRED: '세 장이 바닥에 남아요',
   SHAKE: '승리하면 점수 두 배!',
 };
+export function openingPpukEffect(
+  before: GameView,
+  next: GameView,
+  event: GameEvent,
+): SpecialEffect | null {
+  if (event.type !== 'PPUK_OCCURRED') return null;
+  const previous = new Set(before.transactions.map((t) => t.id));
+  const payments = next.transactions.filter(
+    (t) => !previous.has(t.id) && t.reason === 'OPENING_PPUK' && t.to === event.player,
+  );
+  if (!payments.length) return null;
+  const perOpponent = payments[0].amount;
+  const streak = perOpponent / 3n;
+  const total = payments.reduce((sum, t) => sum + t.amount, 0n);
+  return {
+    label: streak === 1n ? '첫뻑!' : `${streak}연뻑!`,
+    detail: `상대에게 ${perOpponent}점씩 · 총 ${total}점 ${streak === 1n ? '획득' : '추가'}`,
+    player: event.player,
+  };
+}
 export function useGamePresenter({
   generation,
   queue,
@@ -123,8 +148,11 @@ export function useGamePresenter({
                   : prefsRef.current.speed === 'normal'
                     ? 0.65
                     : 0.35;
-          const pause = async (ms: number) => {
-            if (factor) await new Promise<void>((resolve) => setTimeout(resolve, ms * factor));
+          const pause = async (ms: number, minimum = 0) => {
+            if (factor)
+              await new Promise<void>((resolve) =>
+                setTimeout(resolve, Math.max(ms * factor, minimum)),
+              );
             return epoch === generation.current;
           };
           for (const e of events) {
@@ -132,7 +160,9 @@ export function useGamePresenter({
             setLog((old) => [...old.slice(-100), e]);
             setStatus(e.label ?? eventLabel[e.type] ?? '');
             setHighlight(e.cards?.map((c) => c.id) ?? []);
-            if (effectDetails[e.type])
+            const openingEffect = openingPpukEffect(shown, next, e);
+            if (openingEffect) setSpecialEffect(openingEffect);
+            else if (effectDetails[e.type])
               setSpecialEffect({ label: e.label ?? e.type, detail: effectDetails[e.type] });
             const mine = e.player === meRef.current;
             const ids = new Set(e.cards?.map((c) => c.id));
@@ -354,7 +384,7 @@ export function useGamePresenter({
               if (!(await pause(350))) return;
             } else if (e.label) {
               feedback(prefsRef.current, 'special');
-              if (!(await pause(850))) return;
+              if (!(await pause(850, openingEffect ? 2200 : 0))) return;
             }
           }
           if (epoch !== generation.current) return;
