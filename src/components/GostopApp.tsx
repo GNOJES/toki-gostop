@@ -142,6 +142,7 @@ export function GostopApp() {
   const [entering, setEntering] = useState(false);
   const multiplayer = useRef<MultiplayerTransport | null>(null);
   const connectionAttempt = useRef(0);
+  const cancelledEntries = useRef(new Set<number>());
   const saved = useRef<SavedRoom | null>(null);
   const queue = useRef(Promise.resolve());
   const generation = useRef(0);
@@ -325,13 +326,15 @@ export function GostopApp() {
               !!_uid,
             );
             if (attempt !== connectionAttempt.current) {
-              transport.dispose();
+              if (cancelledEntries.current.delete(attempt)) await transport.leave();
+              else transport.dispose();
               return;
             }
             multiplayer.current = transport;
             saved.current = { code: transport.code, uid: transport.uid };
             storeItem('toki-gostop.firebase.room.v1', JSON.stringify(saved.current));
           } catch (error) {
+            cancelledEntries.current.delete(attempt);
             if (attempt !== connectionAttempt.current) return;
             setEntering(false);
             setError(readableError(error));
@@ -588,12 +591,14 @@ export function GostopApp() {
     setSpecialEffect(null);
     setLanding(null);
     waitingFlight.current = {};
+    if (entering && !multiplayer.current) cancelledEntries.current.add(connectionAttempt.current);
     connectionAttempt.current++;
     const previousTransport = multiplayer.current;
     multiplayer.current = null;
     if (previousTransport) void previousTransport.leave().catch(() => previousTransport.dispose());
     storeItem('toki-gostop.firebase.room.v1', null);
     saved.current = null;
+    setEntering(false);
     setScreen('home');
     setRoom(null);
     setView(null);
@@ -668,11 +673,10 @@ export function GostopApp() {
         });
     }
   };
+  const disconnectedSeats = room ? otherSeats(me).filter((id) => !room.connected[id]) : [];
+  const disconnectedNames = disconnectedSeats.map((id) => names[id]).join(' · ');
   const interrupted =
-    mode === 'multi' &&
-    !!room &&
-    !room.closed &&
-    (!connected || otherSeats(me).some((id) => !room.connected[id]));
+    mode === 'multi' && !!room && !room.closed && (!connected || disconnectedSeats.length > 0);
   useEffect(() => {
     if (!interrupted) {
       setDisconnectedSince(null);
@@ -690,10 +694,8 @@ export function GostopApp() {
   const snapshotStatus =
     !connected && mode === 'multi'
       ? '연결을 복구하고 있어요'
-      : mode === 'multi' && room && otherSeats(me).some((id) => !room.connected[id])
-        ? me === 1
-          ? '방장의 연결을 기다리고 있어요.'
-          : '친구의 연결을 기다리고 있어요.'
+      : mode === 'multi' && room && disconnectedSeats.length > 0
+        ? `${withParticle(disconnectedNames, '의')} 연결을 기다리고 있어요.`
         : busy
           ? status
           : view?.phase === 'SELECT_KUKJIN'
@@ -970,7 +972,7 @@ export function GostopApp() {
                 <strong>
                   {!connected
                     ? '내 연결이 잠시 끊겼어요'
-                    : `${withParticle(opponent, '의')} 재접속을 기다려요`}
+                    : `${withParticle(disconnectedNames, '의')} 재접속을 기다려요`}
                 </strong>
                 <span>
                   진행 중인 판을 보관했어요. 같은 기기로 돌아오면 이어서 칠 수 있어요. ·{' '}

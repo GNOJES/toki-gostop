@@ -448,20 +448,30 @@ export class FirebaseTransport implements MultiplayerTransport {
     return this.action({ round, stateVersion, sequence, action: { type: 'NEXT_ROUND' } });
   }
   async leave() {
-    const room = this.room,
-      shouldClose = !this.roomEnded;
+    const observed = this.room?.meta;
+    const shouldClose = !this.roomEnded;
     this.dispose();
-    if (!shouldClose || !room) return;
-    if (room.meta.status === 'waiting' && room.meta.hostUid !== this.uid) {
-      await runTransaction(
-        this.path('meta'),
-        (current) => {
-          const meta = current ?? room.meta;
-          return meta.status === 'waiting' ? releaseWaitingSeat(meta, this.uid) : undefined;
-        },
-        { applyLocally: false },
-      );
-    } else await update(this.path('meta'), { status: 'closed', updatedAt: serverTimestamp() });
+    if (!shouldClose) return;
+    // Entry may be cancelled before the first room listener result arrives.
+    const initial = observed ?? ((await get(this.path('meta'))).val() as RoomData['meta'] | null);
+    if (!initial || seatForUid(initial, this.uid) === null) return;
+    await runTransaction(
+      this.path('meta'),
+      (current) => {
+        const meta = (current ?? initial) as RoomData['meta'];
+        if (
+          meta.roomId !== initial.roomId ||
+          seatForUid(meta, this.uid) === null ||
+          meta.status === 'closed'
+        )
+          return;
+        // A waiting snapshot may lose a race with the host starting the round.
+        if (meta.status === 'waiting' && meta.hostUid !== this.uid)
+          return releaseWaitingSeat(meta, this.uid);
+        return { ...meta, status: 'closed', updatedAt: serverTimestamp() };
+      },
+      { applyLocally: false },
+    );
   }
   dispose() {
     if (this.disposed) return;

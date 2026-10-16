@@ -1,6 +1,6 @@
 # 토끼고스톱 검증 기록
 
-검증 환경: 2026-10-15, Next.js 16.3.8, Chromium·WebKit 자동 브라우저, Java 21 Firebase Auth/RTDB 에뮬레이터. 실제 Android/iPhone 세 대를 조작한 결과와 구분한다.
+검증 환경: 2026-10-16, Next.js 16.3.8, Chromium·WebKit 자동 브라우저, Java 21 Firebase Auth/RTDB 에뮬레이터. 실제 Android/iPhone 세 대를 조작한 결과와 구분한다.
 
 ## 확인하는 사용자 흐름
 
@@ -36,20 +36,20 @@ Java 21을 PATH/JAVA_HOME으로 선택한다. `demo-toki-gostop`의 Auth9199/RTD
 
 ## 출시 게이트
 
-소스를 고정한 순차 출시 게이트가 모두 성공했다(2026-10-15).
+독립 리뷰 보완 후 소스를 고정한 순차 출시 게이트가 모두 성공했다(2026-10-16).
 
 - `npm run typecheck`: 성공.
-- `npm test`: 24 파일, 141 테스트 통과.
-- `npm run test:firebase`: 실제 SDK/Rules 11 테스트 통과.
-- `npm run test:e2e`: Chromium/WebKit 80 테스트 통과, 3.3분. 재시도 설정 없음.
+- `npm test`: 25 파일, 143 테스트 통과.
+- `npm run test:firebase`: 실제 SDK/Rules 13 테스트 통과.
+- `npm run test:e2e`: Chromium/WebKit 81 테스트 통과, 3.3분. 재시도 설정 없음.
 - `npm run build`: Next.js production/standalone·오프라인 shell 14 에셋 생성 성공.
-- `npm run test:pwa`: 오프라인 완주·워커 갱신·GA 3 테스트 통과, 53.6초.
+- `npm run test:pwa`: 오프라인 완주·워커 갱신·GA 3 테스트 통과, 49.6초.
 
-독립 코드 리뷰의 결과는 [구현 인계](IMPLEMENTATION.md)에 이어서 기록한다.
+독립 리뷰의 나가기/시작 경합을 보완했고, 중단된 방 생성 정리와 끊긴 사용자 이름도 재현 테스트 후 수정했다. 결과는 [구현 인계](IMPLEMENTATION.md)에 기록했다.
 
 ## 운영 연결과 실기기 — 아직 미완료
 
-- 지정 원격: 공개 `GNOJES/toki-gostop`. 원본 맞고 원격으로 push하지 않는다.
+- 생성한 공개 저장소: [GNOJES/toki-gostop](https://github.com/GNOJES/toki-gostop). origin fetch/push 모두 새 저장소로 변경했다. 작업 브랜치는 최종 리뷰 후 push한다. 원본 맞고 원격으로 push하지 않는다.
 - 새 Firebase 프로젝트·RTDB·익명 인증·Rules 게시 및 실제 전용 환경 등록.
 - 새 Vercel 프로젝트·실제 운영 origin·별도 GA 스트림, 운영 재빌드·배포.
 - 운영 세 UID 완료 판·같은 자리 복귀·전원 다음 판·실제 새 DB 쓰기, GA 실시간 수신.

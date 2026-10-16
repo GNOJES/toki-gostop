@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { friendTable, synchronized, readBrowserHistory, actCurrent } from './three-player-helper';
-import { editMeta } from './room-fixture';
+import { editMeta, findRoomByName, finishCreationCooldown } from './room-fixture';
 
 test('each UID and two guests can disconnect and resume the same paused round', async ({
   browser,
@@ -13,6 +13,15 @@ test('each UID and two guests can disconnect and resume the same paused round', 
       const watcher = room.pages[(seat + 1) % 3];
       await room.contexts[seat].setOffline(true);
       await expect(watcher.locator('.connection-banner')).toBeVisible();
+      for (const [i, screen] of room.pages.entries())
+        if (i !== seat) {
+          await expect(screen.locator('.connection-banner strong')).toContainText(
+            ['지훈', '민수', '영희'][seat],
+          );
+          await expect(screen.locator('.turn-message')).toContainText(
+            ['지훈', '민수', '영희'][seat],
+          );
+        }
       for (const p of room.pages)
         await expect(p.getByTestId('game-table')).toHaveAttribute('data-can-act', 'false');
       await room.contexts[seat].setOffline(false);
@@ -69,4 +78,36 @@ test('a fourth UID is rejected and a 24 hour expiry closes every seat without a 
     await fourth.close();
     await room.close();
   }
+});
+
+test('explicitly cancelling pending room creation closes it without blocking the next room', async ({
+  page,
+}) => {
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let requested = false;
+  await page.route(/\/accounts:signUp\?/, async (route) => {
+    requested = true;
+    await hold;
+    await route.continue();
+  });
+  const name = '취소' + Math.floor(Math.random() * 1000000);
+  await page.goto('/');
+  await page.getByRole('button', { name: /친구와 치기/ }).click();
+  await page.getByLabel('내 이름').fill(name);
+  await page.getByRole('button', { name: '방 만들기', exact: true }).click();
+  await expect.poll(() => requested).toBe(true);
+  await page.getByRole('button', { name: '나가기', exact: true }).click();
+  await expect(page.getByRole('button', { name: /혼자 치기/ })).toBeVisible();
+  release();
+  await expect.poll(async () => (await findRoomByName(name))?.meta.status).toBe('closed');
+  // Advance only the emulator's existing 10s creation quota, rather than waiting in real time.
+  await finishCreationCooldown((await findRoomByName(name))!.meta.hostUid);
+  await page.getByRole('button', { name: /친구와 치기/ }).click();
+  await expect(page.getByRole('button', { name: '방 만들기', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '방 만들기', exact: true }).click();
+  await expect(page.getByTestId('room-code')).toBeVisible();
+  await expect(page.locator('.error-toast')).toHaveCount(0);
 });

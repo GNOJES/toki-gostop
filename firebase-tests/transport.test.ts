@@ -156,3 +156,50 @@ it('waiting guest can leave and another anonymous user takes the free seat', asy
   await h.leave();
   b.dispose();
 });
+it('waiting departure closes an already active room through the real SDK and Rules', async () => {
+  const users = await Promise.all([user(), user(), user()]);
+  const msgs: (RoomMessage | undefined)[] = [];
+  const transports: FirebaseTransport[] = [];
+  for (const i of [0, 1, 2]) {
+    const t = await FirebaseTransport.open(
+      {
+        state: (m) => {
+          msgs[i] = m;
+        },
+        connection: () => {},
+        error: () => {},
+      },
+      i ? transports[0].code : undefined,
+      `Race${i}`,
+      false,
+      async () => users[i],
+    );
+    transports.push(t);
+    ts.push(t);
+  }
+  await expect.poll(() => msgs.filter((m) => !!m?.game).length).toBe(3);
+  // Model the UI snapshot captured just before the host's active commit; the SDK cache/server are active.
+  const guest = transports[1] as unknown as { room: { meta: { status: string } } };
+  guest.room = { ...guest.room, meta: { ...guest.room.meta, status: 'waiting' } };
+  await transports[1].leave();
+  await expect
+    .poll(async () =>
+      (await get(ref(users[0].db, `rooms/${transports[0].code}/meta/status`))).val(),
+    )
+    .toBe('closed');
+  expect((await get(ref(users[0].db, `rooms/${transports[0].code}/state`))).exists()).toBe(true);
+});
+it('cancelled host entry can close before its first snapshot has been consumed', async () => {
+  const u = await user();
+  const t = await FirebaseTransport.open(
+    { state: () => {}, connection: () => {}, error: () => {} },
+    undefined,
+    'Pending',
+    false,
+    async () => u,
+  );
+  ts.push(t);
+  Object.assign(t, { room: undefined });
+  await t.leave();
+  expect((await get(ref(u.db, `rooms/${t.code}/meta/status`))).val()).toBe('closed');
+});

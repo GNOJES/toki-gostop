@@ -37,3 +37,18 @@ Java 21 이상, 기존 npm lockfile 설치 환경을 사용한다. `npm run test
 5. 실제 세 브라우저/기기에서 방 입장·판 종료·재접속·다음 판·독립 DB 쓰기를 확인한다.
 
 운영 빌드는 원본 matgo ID와 승인 ID 불일치·에뮬레이터 사용을 거절한다. 로컬 CI demo 빌드는 명시적인 CI 컨텍스트에서만 허용하며 Vercel에서는 그 우회를 사용하지 않는다.
+
+## 사용자가 준비할 운영 리소스
+
+현재 Vercel 계정에는 접근할 수 있으므로 Vercel 프로젝트 생성·환경 등록은 담당자가 진행한다. 개인 Firebase 계정은 로그인되지 않아 아래 준비가 필요하다.
+
+1. Firebase Console에서 새 프로젝트를 생성한다. 표시 이름은 **토끼고스톱**, 프로젝트 ID는 사용 가능하면 **toki-gostop**을 선택한다. 기존 맞고 프로젝트와 분리한다.
+2. 웹 앱(`</>`)을 등록한다. Firebase Hosting은 이 구성에서 사용하지 않는다.
+3. Authentication의 로그인 방법에서 **익명(Anonymous)**을 활성화한다.
+4. **Realtime Database**를 생성하고 잠금 모드로 시작한다. 지역은 싱가포르(`asia-southeast1`)를 사용할 수 있다. DB URL을 확인한다. 이 앱은 Firestore를 사용하지 않는다.
+5. 프로젝트 생성 중 Google Analytics를 활성화하고 고스톱용 새 속성을 연결한다. Analytics가 켜진 프로젝트에 웹 앱을 등록하면 전용 웹 스트림의 `measurementId`(`G-...`)가 생성된다. 기존 맞고 스트림을 재사용하지 않는다. 이미 Analytics 없이 만들었다면 프로젝트 설정 → 통합에서 나중에 연결할 수 있다.
+6. 로컬 터미널에서 `firebase login`을 실행해 해당 개인 계정으로 로그인한다. 완료 후 실제 프로젝트 ID를 알려주면 담당자가 웹 앱의 공개 설정을 조회하고 검증한 Rules를 게시한다.
+
+CLI 로그인을 사용하지 않는 경우 웹 앱 설정의 `firebaseConfig` 객체, RTDB URL, GA 측정 ID를 전달하고 Console에서 `database.rules.json`을 게시한다. 운영 환경은 **Rules 게시 → 실제 Firebase/GA 값으로 Vercel 빌드 → 세 브라우저 실서비스 확인** 순서로 연결한다.
+
+공식 설정 문서: [웹 프로젝트 등록](https://firebase.google.com/docs/web/setup), [익명 인증](https://firebase.google.com/docs/auth/web/anonymous-auth), [Realtime Database 생성](https://firebase.google.com/docs/database/web/start).
