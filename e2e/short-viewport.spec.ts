@@ -75,7 +75,9 @@ test('mobile in-app browser keeps guidance and all cards separate as toolbars re
         board.bottom,
       );
     }
-    expect(deck.width).toBe(hands[0].width);
+    expect(new Set(hands.map((card) => card.top)).size).toBe(1);
+    for (let i = 1; i < hands.length; i++)
+      expect(hands[i].left).toBeGreaterThanOrEqual(hands[i - 1].right);
     const rects = [...floor, deck, guide];
     for (let i = 0; i < rects.length; i++)
       for (let j = i + 1; j < rects.length; j++) {

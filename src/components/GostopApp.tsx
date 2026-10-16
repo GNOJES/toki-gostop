@@ -506,7 +506,7 @@ export function GostopApp() {
       saveResult({
         gameId: game.gameId,
         mode: 'single',
-        names: ['나', '토끼 하나', '토끼 둘'],
+        names: ['나', '달토끼', '별토끼'],
         me: 0,
         transactions: game.transactions,
         result: game.result,
@@ -640,7 +640,7 @@ export function GostopApp() {
   const ownName = mode === 'single' ? '나' : (room?.names[me] ?? (friendName.trim() || '나'));
   const names =
     mode === 'single'
-      ? (['나', '토끼 하나', '토끼 둘'] as [string, string, string])
+      ? (['나', '달토끼', '별토끼'] as [string, string, string])
       : (room?.names ?? (['나', '친구 하나', '친구 둘'] as [string, string, string]));
   const opponent = names[view?.currentPlayer ?? otherSeats(me)[0]];
   const zoomCards = (cards: HwatuCard[], title: string, captured = false) =>

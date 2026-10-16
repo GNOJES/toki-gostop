@@ -24,7 +24,7 @@ test('mobile computer dealer waits for start confirmation', async ({ page, conte
   });
   await page.goto('/');
   await page.getByRole('button', { name: /혼자 치기/ }).click();
-  await expect(page.getByRole('dialog', { name: '이번 판의 선' })).toContainText('토끼 둘이 선이에요');
+  await expect(page.getByRole('dialog', { name: '이번 판의 선' })).toContainText('별토끼가 선이에요');
   await expect(page.locator('.dealer-portrait svg.rabbit-mark')).toBeVisible();
   await expect(page.locator('.dealer-portrait')).not.toContainText(/🐰|🐇/);
   await expect(page.getByTestId('game-table')).toHaveAttribute('data-current', '2');
@@ -180,7 +180,6 @@ test('mobile center deck matches floor card size and twelve months never cover e
         bounds: bounds.toJSON(),
         deck: d,
         cards,
-        handWidth: parseFloat(getComputedStyle(document.querySelector('.hand-card .hwatu')!).width),
       };
     });
     expect(measurements.cards).toHaveLength(12);
@@ -189,7 +188,6 @@ test('mobile center deck matches floor card size and twelve months never cover e
     expect(deck.y + deck.height / 2).toBeCloseTo(bounds.y + bounds.height / 2, 0);
     for (const card of cards) {
       expect(card.width).toBeCloseTo(deck.width, 0);
-      expect(card.width).toBeCloseTo(measurements.handWidth, 0);
       expect(card.angle).not.toBe('none');
       expect(card.rect.left).toBeGreaterThanOrEqual(bounds.left);
       expect(card.rect.right).toBeLessThanOrEqual(bounds.right);

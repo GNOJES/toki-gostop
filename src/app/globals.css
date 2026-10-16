@@ -1822,7 +1822,9 @@ strong {
 
 /* Three-player table: seat IDs, rather than DOM order, anchor every flight. */
 .game-table {
-  grid-template-rows: 48px 94px minmax(0, 1fr) 24px 90px 160px 30px;
+  --hand-card-width: 48px;
+  --opponent-card-width: 33px;
+  grid-template-rows: 48px 180px minmax(0, 1fr) 24px 90px 86px 30px;
 }
 .opponents {
   display: grid;
@@ -1853,16 +1855,29 @@ strong {
   display: none;
 }
 .opponent-panel .captured {
-  height: 56px;
-  gap: 2px;
+  height: 142px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 2px 6px;
 }
 .opponent-panel .captured-group {
   min-width: 0;
+  height: auto;
+  min-height: 0;
+}
+.opponent-panel .group-title {
+  line-height: 14px;
 }
 .opponent-panel .mini-stack {
-  transform: scale(0.76);
-  transform-origin: left top;
-  width: 125%;
+  flex: 1;
+  min-height: 0;
+}
+.opponent-panel .mini-stack .hwatu,
+.opponent-panel .empty-slot {
+  width: var(--opponent-card-width);
+}
+.opponent-panel .empty-slot {
+  height: calc(var(--opponent-card-width) * 100 / 64);
 }
 .own-panel .player-info {
   height: 30px;
@@ -1871,8 +1886,14 @@ strong {
   height: 60px;
 }
 .hand-grid {
-  grid-template-columns: repeat(4, var(--play-card-width));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  max-width: calc(var(--hand-card-width) * 7 + 24px);
   justify-content: center;
+}
+.hand-card .hwatu {
+  width: 100%;
+  max-width: var(--hand-card-width);
 }
 .settlement-table {
   width: 100%;
@@ -1892,19 +1913,23 @@ strong {
 @media (max-height: 700px) {
   .game-table {
     --play-card-width: 40px;
-    grid-template-rows: 44px 86px minmax(0, 1fr) 24px 80px 138px 28px;
+    --hand-card-width: 40px;
+    --opponent-card-width: 24px;
+    grid-template-rows: 44px 154px minmax(0, 1fr) 24px 80px 76px 28px;
   }
   .own-panel .captured {
     height: 50px;
   }
   .opponent-panel .captured {
-    height: 50px;
+    height: 116px;
   }
 }
 @media (max-height: 610px) {
   .game-table {
     --play-card-width: 34px;
-    grid-template-rows: 44px 80px minmax(0, 1fr) 24px 74px 120px 26px;
+    --hand-card-width: 34px;
+    --opponent-card-width: 23px;
+    grid-template-rows: 44px 142px minmax(0, 1fr) 24px 74px 66px 26px;
   }
   .own-panel .player-info {
     height: 26px;
@@ -1916,6 +1941,6 @@ strong {
     height: 28px;
   }
   .opponent-panel .captured {
-    height: 46px;
+    height: 110px;
   }
 }
