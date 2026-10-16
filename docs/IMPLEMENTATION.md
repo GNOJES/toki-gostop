@@ -8,7 +8,7 @@
 
 ## 운영 연결
 
-새 공개 저장소 [GNOJES/toki-gostop](https://github.com/GNOJES/toki-gostop)을 생성했다. 기존 Git 자격 증명의 GNOJES 인증과 공개 범위를 확인했으며 origin의 fetch/push를 모두 새 저장소로 변경했다. 작업 브랜치 [codex/gostop-three-player](https://github.com/GNOJES/toki-gostop/tree/codex/gostop-three-player)를 업로드하고 원격 SHA가 검증 커밋과 일치함을 확인했다. Vercel GNOJES 계정 접근을 확인했다. Firebase CLI는 미로그인이며 현재 Chrome에는 업무 Google 계정만 있어 개인 리소스를 만들지 않았다. 고스톱 전용 Firebase·GA 준비 전에는 운영 배포를 완료한 것으로 표시하지 않는다. 실제 휴대폰 세 대의 검증도 남아 있다.
+새 공개 저장소 [GNOJES/toki-gostop](https://github.com/GNOJES/toki-gostop)을 생성했다. 기존 Git 자격 증명의 GNOJES 인증과 공개 범위를 확인했으며 origin의 fetch/push를 모두 새 저장소로 변경했다. 작업 브랜치 [codex/gostop-three-player](https://github.com/GNOJES/toki-gostop/tree/codex/gostop-three-player)를 업로드하고 원격 SHA가 검증 커밋과 일치함을 확인했다. 전용 Firebase `toki-gostop`에 Rules와 익명 인증을 게시하고 Vercel `toki-gostop` 운영 환경을 연결했다(2026-10-16). 운영 주소는 https://toki-gostop.vercel.app, GA는 `G-EFG7BB6NEN`이다. 배포 `dpl_3QEJVda32czkLWcUaeQ4mFT7Kgc8`은 검증 커밋 `c99b078b1fd43f792aac2927260e6bb6e40ef020`으로 READY이며 빌드에서도 단위 143개가 통과했다. 실제 운영 세 브라우저로 익명 인증·방 생성·3명 자동 시작·새로고침 자리 복구·완료 판 결과·전원 다음 판·나가기 방 종료를 확인했다. 혼자+AI 둘의 시작과 운영 GA 전송 요청 6건도 확인했다. 실제 휴대폰 세 대와 GA 관리 화면 수신 확인은 남아 있다.
 
 ## 실행 중 판단과 영향
 
@@ -36,6 +36,6 @@
 - 재접속 대기 이름: 실제 끊긴 자리들의 이름을 표시한다. 세 UID 각각과 복수 단절 UI 테스트 RED→GREEN.
 - 최초 상태 수신 전 생성 취소: meta 조회 후 방을 정리하고 entering을 해제한다. 명시적 취소와 자동 재접속의 낡은 연결 정리를 구별해 새로고침으로 방을 닫지 않는다. 지연시킨 익명 인증 요청 취소→DB closed→재생성 실제 UI 테스트 RED→GREEN. 원래의 10초 생성 제한은 테스트용 에뮬레이터 데이터로만 시간을 넘겨 검증했다.
 - 최종 게이트: 타입 성공 / 단위 143 / Firebase 13 / Chromium·WebKit 81 / 운영 빌드 성공 / PWA 3. 중단·미실행·재시도로 통과시킨 테스트 없음. 미해결 Critical/Important 및 보류한 Minor 없음.
-- Task 8은 개인 Firebase·GA 연결 및 실제 휴대폰 검증을 기다린다. 이 미완료 운영 항목은 코드 검증과 구분한다.
+- Task 8의 Firebase·GA 설정과 Vercel 운영 배포 및 세 브라우저 검증을 완료했다. 실제 휴대폰 검증과 GA 관리 화면 수신 확인은 남아 있으며 자동 브라우저 검증과 구분한다.
 
 추가 판단: 기존 구현에서 물려받은 생성 취소도 방을 다시 만들 수 없게 하는 사용자 문제여서 이번에 보완했다. 최초 snapshot 전 나가기에 meta 읽기가 한 번 추가된다.

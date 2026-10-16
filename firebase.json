@@ -1,4 +1,5 @@
 {
+  "auth": { "providers": { "anonymous": true } },
   "database": { "rules": "database.rules.json" },
   "emulators": {
     "auth": { "host": "127.0.0.1", "port": 9199 },

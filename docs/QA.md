@@ -50,9 +50,10 @@ Java 21을 PATH/JAVA_HOME으로 선택한다. `demo-toki-gostop`의 Auth9199/RTD
 ## 저장소 연결 및 남은 운영·실기기 항목
 
 - 생성한 공개 저장소: [GNOJES/toki-gostop](https://github.com/GNOJES/toki-gostop). origin fetch/push 모두 새 저장소로 변경했다. 작업 브랜치 [codex/gostop-three-player](https://github.com/GNOJES/toki-gostop/tree/codex/gostop-three-player) 업로드를 확인했다. 원본 맞고 원격으로 push하지 않는다.
-- 새 Firebase 프로젝트·RTDB·익명 인증·Rules 게시 및 실제 전용 환경 등록.
-- 새 Vercel 프로젝트·실제 운영 origin·별도 GA 스트림, 운영 재빌드·배포.
-- 운영 세 UID 완료 판·같은 자리 복귀·전원 다음 판·실제 새 DB 쓰기, GA 실시간 수신.
-- Android/iPhone 실제 세 기기에서 카드 터치·작은 화면·카카오 인앱·백그라운드 복귀·제스처 Back·키보드 Back·PWA 설치 확인.
+- Firebase `toki-gostop` 전용 RTDB·Rules·익명 인증 게시 완료. 최초 운영 확인에서 `CONFIGURATION_NOT_FOUND`를 재현했고, 공식 CLI `deploy --only auth`로 인증 설정을 게시한 뒤 친구방 검증을 통과했다.
+- Vercel `toki-gostop` 운영 배포 READY: https://toki-gostop.vercel.app. 소스 `c99b078b1fd43f792aac2927260e6bb6e40ef020`, 배포 `dpl_3QEJVda32czkLWcUaeQ4mFT7Kgc8`. 운영 빌드에서 단위 143개 통과.
+- 실제 운영 Chromium 세 독립 브라우저에서 익명 인증·방 생성·3명 자동 시작·상태 동기화·같은 자리 새로고침 복구·완료 판 3명 결과·전원 다음 판·명시적 나가기의 방 종료 통과. 별도로 혼자+AI 둘 시작 통과. uncaught browser exception 없음.
+- GA `G-EFG7BB6NEN`으로 운영 collect 요청 6건 관찰. GA 관리 화면 실시간 수신은 별도 확인이 필요하다.
+- 남은 실기기 항목: Android/iPhone 실제 세 기기에서 카드 터치·작은 화면·카카오 인앱·백그라운드 복귀·제스처 Back·키보드 Back·PWA 설치 확인.
 
-Vercel 계정 접근은 확인했다. Firebase CLI는 미로그인이고 현재 연결 Chrome은 업무 Google 계정이므로 개인 Firebase 프로젝트를 만들지 않았다. 기존 Git 자격 증명의 GNOJES 인증을 확인했다. 전용 Firebase 로그인과 GA 측정 ID가 필요하다. 배포 성공만으로 실제 기기와 GA 수신이 검증된 것으로 간주하지 않는다.
+실서비스 확인은 2026-10-16에 수행했다. 자동 브라우저 검증을 실제 휴대폰 검증과 동일하게 간주하지 않는다. 원본 맞고 Firebase·Vercel은 변경하지 않았다.
