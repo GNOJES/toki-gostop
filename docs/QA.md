@@ -47,9 +47,9 @@ Java 21을 PATH/JAVA_HOME으로 선택한다. `demo-toki-gostop`의 Auth9199/RTD
 
 독립 리뷰의 나가기/시작 경합을 보완했고, 중단된 방 생성 정리와 끊긴 사용자 이름도 재현 테스트 후 수정했다. 결과는 [구현 인계](IMPLEMENTATION.md)에 기록했다.
 
-## 운영 연결과 실기기 — 아직 미완료
+## 저장소 연결 및 남은 운영·실기기 항목
 
-- 생성한 공개 저장소: [GNOJES/toki-gostop](https://github.com/GNOJES/toki-gostop). origin fetch/push 모두 새 저장소로 변경했다. 작업 브랜치는 최종 리뷰 후 push한다. 원본 맞고 원격으로 push하지 않는다.
+- 생성한 공개 저장소: [GNOJES/toki-gostop](https://github.com/GNOJES/toki-gostop). origin fetch/push 모두 새 저장소로 변경했다. 작업 브랜치 [codex/gostop-three-player](https://github.com/GNOJES/toki-gostop/tree/codex/gostop-three-player) 업로드를 확인했다. 원본 맞고 원격으로 push하지 않는다.
 - 새 Firebase 프로젝트·RTDB·익명 인증·Rules 게시 및 실제 전용 환경 등록.
 - 새 Vercel 프로젝트·실제 운영 origin·별도 GA 스트림, 운영 재빌드·배포.
 - 운영 세 UID 완료 판·같은 자리 복귀·전원 다음 판·실제 새 DB 쓰기, GA 실시간 수신.

@@ -8,7 +8,7 @@
 
 ## 운영 연결
 
-새 공개 저장소 [GNOJES/toki-gostop](https://github.com/GNOJES/toki-gostop)을 생성했다. 기존 Git 자격 증명의 GNOJES 인증과 공개 범위를 확인했으며 origin의 fetch/push를 모두 새 저장소로 변경했다. 최종 리뷰 후 작업 브랜치를 push한다. Vercel GNOJES 계정 접근을 확인했다. Firebase CLI는 미로그인이며 현재 Chrome에는 업무 Google 계정만 있어 개인 리소스를 만들지 않았다. 고스톱 전용 Firebase·GA 준비 전에는 운영 배포를 완료한 것으로 표시하지 않는다. 실제 휴대폰 세 대의 검증도 남아 있다.
+새 공개 저장소 [GNOJES/toki-gostop](https://github.com/GNOJES/toki-gostop)을 생성했다. 기존 Git 자격 증명의 GNOJES 인증과 공개 범위를 확인했으며 origin의 fetch/push를 모두 새 저장소로 변경했다. 작업 브랜치 [codex/gostop-three-player](https://github.com/GNOJES/toki-gostop/tree/codex/gostop-three-player)를 업로드하고 원격 SHA가 검증 커밋과 일치함을 확인했다. Vercel GNOJES 계정 접근을 확인했다. Firebase CLI는 미로그인이며 현재 Chrome에는 업무 Google 계정만 있어 개인 리소스를 만들지 않았다. 고스톱 전용 Firebase·GA 준비 전에는 운영 배포를 완료한 것으로 표시하지 않는다. 실제 휴대폰 세 대의 검증도 남아 있다.
 
 ## 실행 중 판단과 영향
 
