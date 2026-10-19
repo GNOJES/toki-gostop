@@ -46,7 +46,7 @@ export function cardFlight(
     : seats
       ? panel(actor)?.querySelector('[data-testid="opponent-hand"]')
       : document.querySelector('[data-testid="opponent-hand"]');
-  const deck = document.querySelector('.deck .hwatu');
+  const deck = document.querySelector('.deck .hwatu') ?? document.querySelector('.deck');
   const opponentPi = seats
     ? panel(seats.from)?.querySelectorAll('.captured-group')[3]
     : document.querySelectorAll('.captured')[mine ? 0 : 1]?.querySelectorAll('.captured-group')[3];
