@@ -1147,6 +1147,10 @@ strong {
   align-items: center;
   box-shadow: 0 5px 24px #0003;
 }
+.playing .error-toast {
+  top: calc(env(safe-area-inset-top) + 54px);
+  bottom: auto;
+}
 .error-toast span {
   flex: 1;
   line-height: 1.6;
