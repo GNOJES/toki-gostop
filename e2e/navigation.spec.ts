@@ -1,3 +1,4 @@
+import { startDebugGame } from './debug-helper';
 import { openHandZoom } from './zoom-helper';
 import { test, expect } from '@playwright/test';
 
@@ -24,7 +25,7 @@ test('mobile back closes nested menus, confirms game exit and keeps the home pag
   await expect(page.getByRole('heading', { name: '친구와 치기' })).toBeVisible();
   await page.goBack();
   await expect(page.getByRole('link', { name: '토끼고스톱 홈' })).toBeVisible();
-  await page.getByRole('button', { name: /혼자 치기/ }).click();
+  await startDebugGame(page);
   const game = page.getByTestId('game-table');
   await expect(game).toBeVisible();
   await expect(game).toHaveAttribute('data-phase', 'PLAY');
@@ -62,7 +63,7 @@ test('mobile floor pairs and triples overlap a third of each face, enlarge and p
   page,
 }) => {
   await page.goto('/?debug=1');
-  await page.getByRole('button', { name: /혼자 치기/ }).click();
+  await startDebugGame(page);
   for (const fixture of ['자뻑', '바닥 두 장 · 따닥']) {
     await page.getByRole('button', { name: '개발', exact: true }).click();
     await page.getByRole('button', { name: fixture, exact: true }).click();
