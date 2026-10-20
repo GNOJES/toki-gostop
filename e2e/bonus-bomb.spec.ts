@@ -64,6 +64,11 @@ test('mobile bomb creates two playable hand tokens and stolen pi flies from oppo
   await expect(
     page.locator('.own-panel .captured').locator(`[data-captured-card-id="${stolen}"]`),
   ).toBeVisible();
+  // The bomb and transfer animations are verified above. Skip the two AI turns'
+  // presentation before checking that a real pass token can be played.
+  await page.evaluate(() =>
+    (window as unknown as { __gostopDebug: { skip: () => void } }).__gostopDebug.skip(),
+  );
   await expect(page.getByTestId('game-table')).toHaveAttribute('data-can-act', 'true');
   await page.locator('.bomb-pass').first().click();
   await expect(page.locator('.bomb-pass')).toHaveCount(1);
